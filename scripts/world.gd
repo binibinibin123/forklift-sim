@@ -55,6 +55,9 @@ func build(c: Course) -> void:
 	# 바닥
 	var ground := box(self, Vector3(400, 0.1, 400), v3(b.get_center(), -0.05), mat(Color(0.42, 0.43, 0.42), 0.95))
 	ground.name = "Ground"
+	if RenderingServer.get_current_rendering_method() == "gl_compatibility":
+		# 웹(토스) 빌드: 호환 렌더러에서 400m 바닥이 하얗게 떠서 조명 없이 그린다.
+		ground.material_override.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	# 코스 포장면(조금 밝게)
 	var lane_m := mat(Color(0.56, 0.57, 0.55), 0.9)
 	for r in c.rects:

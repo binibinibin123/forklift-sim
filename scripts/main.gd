@@ -43,6 +43,7 @@ var replay_bar: Control
 var _faults_seen := 0
 var store := Store.new()
 var iap: Iap
+var sound_btn: Button
 var exam_btn: Button
 var unlock_btn: Button
 var restore_btn: Button
@@ -126,6 +127,7 @@ func _build_scene() -> void:
 	cam = Camera3D.new()
 	cam.fov = 62.0
 	cam.near = 0.05
+	cam.far = 300.0
 	add_child(cam)
 	cam.current = true
 
@@ -249,12 +251,15 @@ func _build_ui() -> void:
 	mv.add_child(row2)
 	unlock_btn = _button(row2, "전체 해제", _buy, Color(0.45, 0.85, 0.5))
 	restore_btn = _button(row2, "구매 복원", func(): iap.restore(), Color(0.8, 0.8, 0.8))
+	sound_btn = _button(row2, "", _toggle_sound, Color(0.8, 0.8, 0.8))
+	_sync_sound_btn()
 	var link := LinkButton.new()
 	link.text = "지원 · 개인정보 처리방침"
 	link.add_theme_font_size_override("font_size", 18)
 	link.add_theme_color_override("font_color", Color(0.75, 0.88, 1.0))
 	link.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	link.pressed.connect(func(): OS.shell_open(SUPPORT_URL))
+	link.visible = not OS.has_feature("toss")   # 토스 미니앱은 바깥 링크 금지
 	mv.add_child(link)
 	var note := _label(mv, 17, Color(1, 1, 1, 0.6))
 	note.text = "실제 장비와 조작감이 다릅니다. 코스 순서와 실격·감점 기준을 미리 익히는 용도로 쓰세요."
@@ -704,6 +709,25 @@ func _make_sounds() -> void:
 		p.stream = sfx[k]
 		add_child(p)
 		sfx[k] = p
+
+
+func _toggle_sound() -> void:
+	store.data.sound = not bool(store.data.sound)
+	store.save()
+	_sync_sound_btn()
+
+
+func _sync_sound_btn() -> void:
+	sound_btn.text = "소리 켜짐" if bool(store.data.sound) else "소리 꺼짐"
+
+
+## 앱이 뒤로 가면 소리를 바로 멈추고, 돌아오면 다시 켠다.
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED:
+			AudioServer.set_bus_mute(0, true)
+		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_RESUMED:
+			AudioServer.set_bus_mute(0, false)
 
 
 func _play(name: String) -> void:
