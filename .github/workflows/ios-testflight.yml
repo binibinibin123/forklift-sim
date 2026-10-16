@@ -99,6 +99,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             -quiet archive
 
+      - name: Let the export sign embedded frameworks
+        run: |
+          for f in build/app.xcarchive/Products/Applications/*.app/Frameworks/*.framework; do
+            [ -e "$f" ] || continue
+            codesign --remove-signature "$f"
+          done
+
       - name: Sign and upload to TestFlight
         run: |
           cat > build/ExportOptions.plist <<EOF

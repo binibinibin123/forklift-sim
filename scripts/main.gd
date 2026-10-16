@@ -41,6 +41,16 @@ var result_panel: Control
 var result_text: RichTextLabel
 var replay_bar: Control
 var _faults_seen := 0
+var store := Store.new()
+var iap: Iap
+var exam_btn: Button
+var unlock_btn: Button
+var restore_btn: Button
+var best_label: Label
+var unlock_panel: Control
+var unlock_text: Label
+var sfx := {}
+const SUPPORT_URL := "https://binibinibin123.github.io/gentive-app-support/forklift-sim/support.html"
 var _args := {}
 var _shot_frames := -1
 
@@ -49,10 +59,19 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		var kv := a.split("=", true, 1)
 		_args[kv[0]] = kv[1] if kv.size() > 1 else "1"
+	store.load_data()
+	iap = Iap.new()
+	add_child(iap)
+	iap.changed.connect(func(_on): _refresh_lock())
+	iap.price_known.connect(func(_p): _refresh_lock())
+	iap.failed.connect(func(): _toast("구매를 마치지 못했어요. 잠시 뒤 다시 해 주세요.", Color(1, 0.8, 0.4)))
+	iap.setup(store, _args.has("locked"))
+	_make_sounds()
 	course = Course.load_default()
 	sim = Sim.new(course, true)
 	_build_scene()
 	_build_ui()
+	_refresh_lock()
 	_show_menu()
 	if _args.has("shot"):
 		_setup_shot()
@@ -221,7 +240,22 @@ func _build_ui() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	mv.add_child(row)
 	_button(row, "연습 모드", _start.bind(false), Color(0.55, 0.85, 1.0))
-	_button(row, "모의시험 (4분)", _start.bind(true))
+	exam_btn = _button(row, "모의시험 (4분)", _start.bind(true))
+	best_label = _label(mv, 20, Color(1, 1, 1, 0.8))
+	best_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 20)
+	row2.alignment = BoxContainer.ALIGNMENT_CENTER
+	mv.add_child(row2)
+	unlock_btn = _button(row2, "전체 해제", _buy, Color(0.45, 0.85, 0.5))
+	restore_btn = _button(row2, "구매 복원", func(): iap.restore(), Color(0.8, 0.8, 0.8))
+	var link := LinkButton.new()
+	link.text = "지원 · 개인정보 처리방침"
+	link.add_theme_font_size_override("font_size", 18)
+	link.add_theme_color_override("font_color", Color(0.75, 0.88, 1.0))
+	link.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	link.pressed.connect(func(): OS.shell_open(SUPPORT_URL))
+	mv.add_child(link)
 	var note := _label(mv, 17, Color(1, 1, 1, 0.6))
 	note.text = "실제 장비와 조작감이 다릅니다. 코스 순서와 실격·감점 기준을 미리 익히는 용도로 쓰세요."
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -249,6 +283,30 @@ func _build_ui() -> void:
 	_button(rr, "리플레이", _start_replay, Color(0.55, 0.85, 1.0))
 	_button(rr, "메뉴", _show_menu, Color(0.8, 0.8, 0.8))
 
+	# 전체 해제 안내
+	unlock_panel = CenterContainer.new()
+	unlock_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(unlock_panel)
+	var up := _panel(unlock_panel)
+	var uv := VBoxContainer.new()
+	uv.add_theme_constant_override("separation", 16)
+	up.add_child(uv)
+	var ut := _label(uv, 36, ACCENT)
+	ut.text = "전체 해제"
+	ut.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	unlock_text = _label(uv, 23)
+	unlock_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	unlock_text.custom_minimum_size = Vector2(720, 0)
+	unlock_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var ur := HBoxContainer.new()
+	ur.add_theme_constant_override("separation", 16)
+	ur.alignment = BoxContainer.ALIGNMENT_CENTER
+	uv.add_child(ur)
+	_button(ur, "해제하기", _buy, Color(0.45, 0.85, 0.5))
+	_button(ur, "구매 복원", func(): iap.restore(), Color(0.8, 0.8, 0.8))
+	_button(ur, "닫기", _show_menu, Color(0.8, 0.8, 0.8))
+	unlock_panel.visible = false
+
 	replay_bar = HBoxContainer.new()
 	replay_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	replay_bar.position = Vector2(-140, -100)
@@ -256,8 +314,41 @@ func _build_ui() -> void:
 	_button(replay_bar, "리플레이 닫기", _end_replay, Color(0.8, 0.8, 0.8))
 
 
+func _refresh_lock() -> void:
+	if not unlock_btn:
+		return
+	var price := iap.price if iap.price != "" else ""
+	unlock_btn.visible = not iap.unlocked
+	restore_btn.visible = not iap.unlocked
+	unlock_btn.text = ("전체 해제 " + price).strip_edges()
+	exam_btn.text = "모의시험 (4분)" if iap.unlocked else "모의시험 (해제 필요)"
+	var best := int(store.data.best)
+	best_label.text = "모의시험 최고 %d점 · 합격 %d회" % [best, int(store.data.passes)] if best >= 0 else ""
+	if iap.unlocked and unlock_panel.visible:
+		unlock_panel.visible = false
+		_toast("전체 해제됐어요. 고마워요!", GREEN)
+		_show_menu()
+
+
+func _buy() -> void:
+	iap.buy()
+
+
+func _show_unlock(why: String) -> void:
+	state = State.RESULT
+	controls.visible = false
+	controls.enabled = false
+	menu_panel.visible = false
+	result_panel.visible = false
+	unlock_panel.visible = true
+	var price := (" (" + iap.price + ")") if iap.price != "" else ""
+	unlock_text.text = why + "\n\n한 번 결제%s로 연습 모드 전체 코스, 4분 모의시험 채점, 실격 지점 리플레이를 계속 쓸 수 있어요. 광고나 구독은 없어요." % price
+
+
 func _show_menu() -> void:
 	state = State.MENU
+	unlock_panel.visible = false
+	_refresh_lock()
 	menu_panel.visible = true
 	result_panel.visible = false
 	replay_bar.visible = false
@@ -269,6 +360,10 @@ func _show_menu() -> void:
 
 
 func _start(exam_mode: bool) -> void:
+	if exam_mode and not iap.unlocked:
+		_show_unlock("모의시험은 전체 해제 후 쓸 수 있어요.")
+		return
+	unlock_panel.visible = false
 	exam = exam_mode
 	sim.exam = exam
 	sim.reset()
@@ -309,6 +404,7 @@ func _on_action(name: String) -> void:
 		"signal":
 			if state == State.RUN and exam and not sim.signal_given:
 				sim.give_signal()
+				_play("whistle")
 				controls.set_button("signal", "")
 				_toast("삐익! 1분 안에 출발선을 지나세요", GREEN)
 	_sync_controls_buttons()
@@ -341,15 +437,18 @@ func _physics_process(dt: float) -> void:
 		var f: Dictionary = sim.faults[_faults_seen]
 		_faults_seen += 1
 		_toast(("실격: " if exam else "실격 사유: ") + f.msg)
+		_play("buzzer")
 	if sim.done:
 		_show_result()
+	elif not iap.unlocked and sim.step >= Sim.Step.UNLOADED:
+		_play("chime")
+		_show_unlock("잘했어요! 무료 연습은 하역까지예요. 후진선 터치부터 주차까지 남은 코스는 전체 해제 후 이어서 연습할 수 있어요.")
 
 
 func _process(dt: float) -> void:
 	if state == State.REPLAY:
 		_replay_step(dt)
-	world.sync(sim)
-	fork.sync(sim, dt)
+	_sync_models(dt)
 	_update_marker(dt)
 	_update_camera(dt)
 	_update_hud(dt)
@@ -358,6 +457,20 @@ func _process(dt: float) -> void:
 		_shot_frames -= 1
 		if _shot_frames == 0:
 			_take_shot()
+
+
+## 3D 모델 위치. 들고 있는 팔레트는 마스트 틸트만큼 같이 기울인다.
+func _sync_models(dt: float) -> void:
+	world.sync(sim)
+	fork.sync(sim, dt)
+	if sim.carried:
+		var axis := fork.global_transform.basis.z.normalized()
+		var ang := deg_to_rad(sim.tilt)
+		var piv := fork.mast.global_position
+		var t := world.pallet.global_transform
+		t.origin = piv + (t.origin - piv).rotated(axis, ang)
+		t.basis = Basis(axis, ang) * t.basis
+		world.pallet.global_transform = t
 
 
 func _update_marker(dt: float) -> void:
@@ -456,6 +569,14 @@ static func _clock(t: float) -> String:
 # ---------- 결과·리플레이 ----------
 func _show_result() -> void:
 	state = State.RESULT
+	if exam and sim.step >= Sim.Step.TO_LOAD:
+		store.data.runs = int(store.data.runs) + 1
+		if sim.passed():
+			store.data.passes = int(store.data.passes) + 1
+		if sim.faults.is_empty():
+			store.data.best = maxi(int(store.data.best), sim.score())
+		store.save()
+	_play("chime" if sim.passed() else "buzzer")
 	controls.visible = false
 	controls.enabled = false
 	result_panel.visible = true
@@ -540,10 +661,30 @@ func _setup_shot() -> void:
 			"top": cam_mode = Cam.TOP
 			"result":
 				_show_result()
+			"icon":
+				ui.visible = false
+				marker.visible = false
+				cam_mode = Cam.CHASE
+			"unlock":
+				_show_unlock("모의시험은 전체 해제 후 쓸 수 있어요.")
 		_sync_controls_buttons()
 		set_physics_process(false)
 		for i in 60:
 			_update_camera(1.0)
+		if scene == "icon":
+			set_process(false)
+			_sync_models(0.0)
+			var r := World.v3(sim.right())
+			var f := World.v3(sim.dir())
+			var c := World.v3(sim.pos) + f * 0.4 + Vector3(0, 1.1, 0)
+			cam.projection = Camera3D.PROJECTION_PERSPECTIVE
+			cam.fov = 38.0
+			cam.global_position = c + f * 3.6 - r * 3.4 + Vector3(0, 1.2, 0)
+			cam.look_at(c, Vector3.UP)
+			RenderingServer.frame_post_draw.connect(func():
+				if _shot_frames <= 0: return
+				_shot_frames -= 1
+				if _shot_frames == 0: _take_shot(), CONNECT_DEFERRED)
 	_shot_frames = 20
 
 
@@ -551,3 +692,45 @@ func _take_shot() -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(_args.shot)
 	get_tree().quit()
+
+
+# ---------- 소리(코드로 만든 짧은 효과음) ----------
+func _make_sounds() -> void:
+	sfx.whistle = _tone([[2900.0, 0.12], [0.0, 0.05], [2900.0, 0.5]], 0.35, true)
+	sfx.buzzer = _tone([[220.0, 0.45]], 0.3, false, true)
+	sfx.chime = _tone([[880.0, 0.14], [1175.0, 0.3]], 0.3)
+	for k in sfx:
+		var p := AudioStreamPlayer.new()
+		p.stream = sfx[k]
+		add_child(p)
+		sfx[k] = p
+
+
+func _play(name: String) -> void:
+	if sfx.has(name) and bool(store.data.sound):
+		sfx[name].play()
+
+
+static func _tone(parts: Array, vol: float, trill := false, square := false) -> AudioStreamWAV:
+	var rate := 22050
+	var data := PackedByteArray()
+	for part in parts:
+		var f: float = part[0]
+		var n := int(rate * float(part[1]))
+		for i in n:
+			var t := float(i) / rate
+			var env := minf(1.0, minf(i / 200.0, (n - i) / 400.0))
+			var ff := f * (1.0 + (0.03 * sin(TAU * 28.0 * t) if trill else 0.0))
+			var v := sin(TAU * ff * t)
+			if square:
+				v = signf(v) * 0.6
+			if f <= 0.0:
+				v = 0.0
+			var x := int(clampf(v * env * vol, -1.0, 1.0) * 32767.0)
+			data.append(x & 0xff)
+			data.append((x >> 8) & 0xff)
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = rate
+	w.data = data
+	return w

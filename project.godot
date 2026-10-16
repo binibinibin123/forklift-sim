@@ -4,6 +4,7 @@ config_version=5
 [application]
 config/name="지게차 실기"
 run/main_scene="res://main.tscn"
+config/icon="res://icon.png"
 config/features=PackedStringArray("4.7", "Mobile")
 
 [display]
