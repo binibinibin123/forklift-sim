@@ -85,22 +85,43 @@ func _build_scene() -> void:
 	e.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
 	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.38, 0.58, 0.85)
-	sm.sky_horizon_color = Color(0.78, 0.84, 0.9)
-	sm.ground_horizon_color = Color(0.6, 0.62, 0.6)
-	sm.ground_bottom_color = Color(0.45, 0.46, 0.45)
+	sm.sky_top_color = Color(0.3, 0.52, 0.86)
+	sm.sky_horizon_color = Color(0.8, 0.86, 0.93)
+	sm.ground_horizon_color = Color(0.62, 0.64, 0.62)
+	sm.ground_bottom_color = Color(0.4, 0.42, 0.4)
+	sm.sun_angle_max = 20.0
+	sm.sun_curve = 0.12
+	sm.sky_cover = load("res://textures/clouds.png")
+	sm.sky_cover_modulate = Color(1, 1, 1, 0.85)
 	sky.sky_material = sm
 	e.sky = sky
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_energy = 0.9
-	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	e.ambient_light_energy = 0.85
+	e.tonemap_mode = Environment.TONE_MAPPER_ACES
+	e.tonemap_exposure = 1.05
+	if not Mats.compat:
+		e.fog_enabled = true
+		e.fog_light_color = Color(0.78, 0.84, 0.92)
+		e.fog_density = 0.004
+		e.fog_sky_affect = 0.2
+		e.ssao_enabled = true
+		e.ssao_intensity = 1.5
+		e.glow_enabled = true
+		e.glow_intensity = 0.35
+		e.glow_bloom = 0.05
+		e.glow_hdr_threshold = 1.2
 	env.environment = e
 	add_child(env)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52, -35, 0)
-	sun.light_energy = 1.25
+	sun.rotation_degrees = Vector3(-48, -38, 0)
+	sun.light_energy = 1.3
+	sun.light_color = Color(1.0, 0.96, 0.9)
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 45.0
+	sun.directional_shadow_max_distance = 60.0
+	sun.directional_shadow_split_1 = 0.08
+	sun.directional_shadow_split_2 = 0.25
+	sun.directional_shadow_blend_splits = true
+	sun.shadow_bias = 0.03
 	add_child(sun)
 
 	world = World.new()
