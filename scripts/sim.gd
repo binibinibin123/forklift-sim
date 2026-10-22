@@ -86,6 +86,11 @@ var _last_fault := {}
 var t_total := 0.0
 var _line_touching := false
 var _ground_touching := false
+var drill_goal := -1              # 드릴: 이 단계에 닿으면 끝
+var horn_count := 0
+const PART_LOAD := "load"         # 상차 작업 45점: 출발~적재~전진 주행
+const PART_UNLOAD := "unload"     # 하차 작업 55점: 하역~후진선~복귀~주차
+const PART_MAX := {"load": 45, "unload": 55}
 
 
 func _init(c: Course = null, exam_mode := true) -> void:
@@ -124,6 +129,46 @@ func reset() -> void:
 	t_total = 0.0
 	_line_touching = false
 	_ground_touching = false
+	drill_goal = -1
+	horn_count = 0
+
+
+## 드릴: 코스 중간 상태에서 시작. d = {pos, heading, step, goal, lift?, tilt?, carried?, pallet?, pallet_heading?, pallet_base?, engaged?, seatbelt?}
+func start_drill(d: Dictionary) -> void:
+	reset()
+	seatbelt = d.get("seatbelt", true)
+	park_brake = d.get("park_brake", false)
+	signal_given = true
+	pos = d.pos
+	heading = d.heading
+	lift = d.get("lift", 0.25)
+	tilt = d.get("tilt", 0.0)
+	step = d.step
+	running = step > Step.READY
+	if d.get("carried", false):
+		engaged = true
+		carried = true
+		carry_local = Vector2(CARRIAGE + FORK_LEN - PALLET * 0.5, 0.0)
+		carry_dang = 0.0
+		_update_pallet_follow()
+	elif d.has("pallet"):
+		pallet_pos = d.pallet
+		pallet_heading = d.get("pallet_heading", 0.0)
+		pallet_base = d.get("pallet_base", 0.0)
+		engaged = d.get("engaged", false)
+	drill_goal = d.goal
+
+
+func part_of_step(st: int) -> String:
+	return PART_LOAD if st <= Step.LOADED else PART_UNLOAD
+
+
+func part_score(part: String) -> int:
+	var s: int = PART_MAX[part]
+	for d in deductions:
+		if d.part == part:
+			s -= d.pts
+	return maxi(s, 0)
 
 
 func give_signal() -> void:
@@ -194,7 +239,7 @@ func _deduct(code: String, msg: String, pts: int) -> void:
 	if _once.has(code):
 		return
 	_once[code] = true
-	deductions.append({t = t_exam, code = code, msg = msg, pts = pts})
+	deductions.append({t = t_exam, code = code, msg = msg, pts = pts, part = part_of_step(step)})
 
 
 func _fault(code: String, msg: String) -> void:
@@ -212,10 +257,7 @@ func _fault(code: String, msg: String) -> void:
 
 
 func score() -> int:
-	var s := 100
-	for d in deductions:
-		s -= d.pts
-	return max(s, 0)
+	return part_score(PART_LOAD) + part_score(PART_UNLOAD)
 
 
 func passed() -> bool:
@@ -292,6 +334,9 @@ func update(dt: float, inp: Dictionary) -> void:
 	_check_ground()
 	_check_travel_rules()
 	_check_progress(prev_pos)
+	if drill_goal >= 0 and step >= drill_goal and not done:
+		done = true
+		running = false
 
 
 ## false = 충돌로 움직임을 막아야 함

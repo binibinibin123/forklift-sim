@@ -20,6 +20,8 @@ func _initialize() -> void:
 	test_missed_pallet()
 	test_seatbelt()
 	test_timeout()
+	test_scoring_parts()
+	test_drills()
 	print("FAILS: %d" % fails)
 	quit(1 if fails > 0 else 0)
 
@@ -190,3 +192,46 @@ func test_timeout() -> void:
 		sim.update(0.1, {})
 	check(sim.faults.size() > 0 and sim.faults[0].code == "start_late", "1분 안에 출발 못하면 실격")
 	check(not sim.done, "연습 모드는 실격이어도 계속")
+
+
+func test_scoring_parts() -> void:
+	print("scoring parts")
+	var sim := Sim.new(null, false)
+	check(sim.score() == 100 and sim.part_score("load") == 45 and sim.part_score("unload") == 55, "기본 45/55")
+	sim.step = Sim.Step.LOADED
+	sim._deduct("a", "x", 5)
+	sim.step = Sim.Step.UNLOADED
+	sim._deduct("b", "y", 5)
+	check(sim.part_score("load") == 40 and sim.part_score("unload") == 50 and sim.score() == 90, "단계별로 상차/하차에 나뉘어 감점")
+
+
+func test_drills() -> void:
+	print("drills")
+	var c := Course.load_default()
+	for d in Drills.list(c):
+		var sim := Sim.new(c, false)
+		sim.start_drill(d)
+		check(sim.step == d.step and sim.faults.is_empty(), "%s: 시작 상태" % d.title)
+		for i in 60:
+			sim.update(1.0 / 60.0, {})
+		check(sim.faults.is_empty() and not sim.done, "%s: 가만히 있으면 실격 없음" % d.title)
+		check(c.inside(sim.pos), "%s: 코스 안에서 시작" % d.title)
+	# 후진선 터치 드릴: 포크 내리면 바로 완료
+	var sim := Sim.new(c, false)
+	sim.start_drill(Drills.list(c)[3])
+	var ap := Autopilot.new(sim)
+	var bx := c.back_line_x - (Sim.CARRIAGE + Sim.FORK_LEN * 0.5)
+	ap.drive(Autopilot.rounded([Vector2(sim.pos.x, c.unload_target.y), Vector2(bx - 1, c.unload_target.y)], 0.5), true, func(s): return s.pos.x <= bx, 0.8)
+	sim.gear = 0
+	ap.set_fork(0.0, 0.0)
+	check(sim.step == Sim.Step.TOUCHED and sim.done, "후진선 터치 드릴 완료")
+	# 주차 드릴
+	sim = Sim.new(c, false)
+	sim.start_drill(Drills.list(c)[5])
+	ap = Autopilot.new(sim)
+	ap.drive(Autopilot.rounded([Vector2(0, 8), Vector2(0, 1.9)], 0.5), true, func(s): return s.pos.y <= 2.2, 1.0)
+	sim.gear = 0
+	ap.set_fork(0.0, -2.0)
+	sim.park_brake = true
+	ap._tick({})
+	check(sim.step == Sim.Step.PARKED and sim.done and sim.faults.is_empty(), "주차 드릴 완료")

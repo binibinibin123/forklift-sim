@@ -32,6 +32,7 @@ var _wheel_c := Vector2.ZERO
 var _wheel_r := 150.0
 var _font: Font
 var _sim_steer := 0.0             # 실제 뒷바퀴 각도(표시용)
+var sens := 1.0                   # 핸들 감도
 
 
 func _ready() -> void:
@@ -44,7 +45,7 @@ func _ready() -> void:
 
 
 func steer() -> float:
-	return clampf(-wheel_rot / (TAU * WHEEL_TURNS), -1.0, 1.0)
+	return clampf(-wheel_rot / (TAU * WHEEL_TURNS) * sens, -1.0, 1.0)
 
 
 func set_button(name: String, label: String, on := false) -> void:
@@ -93,6 +94,7 @@ func _layout() -> void:
 		"menu": {rect = Rect2(W - bw - 20, 20, bw, bh), label = "메뉴", on = false},
 		"camera": {rect = Rect2(W - 2 * bw - 32, 20, bw, bh), label = "시점", on = false},
 		"look": {rect = Rect2(W - 3 * bw - 44, 20, bw, bh), label = "뒤 보기", on = false},
+		"horn": {rect = Rect2(_wheel_c.x + _wheel_r + 14, _wheel_c.y + 30, 104, 52), label = "경음기", on = false},
 	}
 	for b in old:
 		if buttons.has(b):
@@ -129,6 +131,7 @@ func _input(event: InputEvent) -> void:
 			KEY_C: action.emit("camera")
 			KEY_V: action.emit("look")
 			KEY_ENTER: action.emit("signal")
+			KEY_H: action.emit("horn")
 		queue_redraw()
 
 
