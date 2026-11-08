@@ -26,7 +26,8 @@ func setup(store: Store, force_locked: bool) -> void:
 	if Engine.has_singleton("IOSInAppPurchase"):
 		unlocked = bool(store.data.get("unlocked", false))
 		_sk = Engine.get_singleton("IOSInAppPurchase")
-		_sk.response.connect(_on_response)
+		# The plugin emits from a StoreKit background thread; handle it on the main thread.
+		_sk.response.connect(_on_response, CONNECT_DEFERRED)
 		_sk.request("startUpdateTask", {})
 		_sk.request("proceedUnfinishedTransactions", {})
 		_sk.request("products", {"productIDs": [PRODUCT]})
