@@ -17,7 +17,7 @@ const KINDS := ["small", "wrecker", "large"]
 const CAM_NAME := {"chase": "뒤에서", "top": "위에서", "driver": "운전석"}
 const FREE := {"small": ["crank", "curve", "straight_back"]}
 const SIM_DT := 1.0 / 60.0
-const VERSION := "2.0"
+const VERSION := "1.0"
 
 var store := TowStore.new()
 var purchases: Purchases

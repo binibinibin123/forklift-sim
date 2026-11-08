@@ -594,7 +594,7 @@ func _show_unlock(why: String) -> void:
 	result_panel.visible = false
 	unlock_panel.visible = true
 	var price := (" (" + iap.price + ")") if iap.price != "" else ""
-	unlock_text.text = why + "\n\n한 번 결제%s로 연습 코스 전체, 단계 드릴 6종, 4분 모의시험 채점, 실격 지점 리플레이를 계속 쓸 수 있어요. 광고나 구독은 없어요." % price
+	unlock_text.text = why + "\n\n한 번 결제%s로 연습 코스 전체, 단계 드릴 6종, 4분 모의시험 채점, 실격 지점 리플레이, 견인 기능시험 3종 전체를 계속 쓸 수 있어요. 광고나 구독은 없어요." % price
 
 
 func _show_menu() -> void:
