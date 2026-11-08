@@ -525,6 +525,7 @@ def main():
         step("version text", set_version, app_id, v)
         step("screenshots", set_screenshots, v)
         step("review details", set_review, v)
+        step("in-app purchase", set_iap, app_id)
     if mode in ("submit", "all"):
         if FAILED:
             sys.exit("Setup steps failed, not submitting: " + ", ".join(FAILED))
