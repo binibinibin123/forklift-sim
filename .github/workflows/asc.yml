@@ -1,0 +1,39 @@
+name: App Store Connect
+
+# Fills the App Store listing, in-app purchase and review info through the
+# App Store Connect API, and (mode=submit) attaches the newest processed
+# build and submits for review. Run by hand from the Actions tab.
+# Reads the same secrets as ios-testflight.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "setup, submit, or all"
+        required: true
+        default: setup
+      min_build:
+        description: "submit: wait for this build number (or newer) before attaching"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  asc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "pyjwt[crypto]==2.10.1"
+      - name: App Store Connect (${{ inputs.mode }})
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          MIN_BUILD: ${{ inputs.min_build }}
+        run: python tools/asc/asc.py "${{ inputs.mode }}"
