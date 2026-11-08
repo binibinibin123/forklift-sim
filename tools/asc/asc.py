@@ -244,6 +244,11 @@ def _shots(v, lc):
            if l["attributes"]["locale"] == lc][0]
     sets = call("GET", f"/v1/appStoreVersionLocalizations/{loc['id']}/appScreenshotSets")["data"]
     s = next((x for x in sets if x["attributes"]["screenshotDisplayType"] == "APP_IPHONE_67"), None)
+    for x in sets:   # older forklift-only sets for smaller iPhones; 6.9" scales down to them
+        t = x["attributes"]["screenshotDisplayType"]
+        if t.startswith("APP_IPHONE_") and t != "APP_IPHONE_67":
+            call("DELETE", f"/v1/appScreenshotSets/{x['id']}")
+            print("removed old screenshot set:", t)
     if s is None:
         s = call("POST", "/v1/appScreenshotSets", {"data": {
             "type": "appScreenshotSets", "attributes": {"screenshotDisplayType": "APP_IPHONE_67"},
