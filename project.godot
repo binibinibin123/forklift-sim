@@ -7,6 +7,9 @@ run/main_scene="res://main.tscn"
 config/icon="res://icon.png"
 config/features=PackedStringArray("4.7", "Mobile")
 
+[audio]
+general/text_to_speech=true
+
 [display]
 window/size/viewport_width=1560
 window/size/viewport_height=720

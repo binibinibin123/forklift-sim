@@ -67,13 +67,16 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		var kv := a.split("=", true, 1)
 		_args[kv[0]] = kv[1] if kv.size() > 1 else "1"
+	if _args.get("app", "") == "towing":
+		_open_towing.call_deferred()
+		return
 	store.load_data()
-	iap = Iap.new()
-	add_child(iap)
-	iap.changed.connect(func(_on): _refresh_lock())
-	iap.price_known.connect(func(_p): _refresh_lock())
-	iap.failed.connect(func(): _toast("구매를 마치지 못했어요. 잠시 뒤 다시 해 주세요.", Color(1, 0.8, 0.4)))
-	iap.setup(store, _args.has("locked"))
+	# named methods, not lambdas: the shared Iap outlives this scene and drops
+	# method connections by itself when the scene is freed
+	iap = Iap.shared()
+	iap.changed.connect(_on_iap_changed)
+	iap.price_known.connect(_on_iap_changed)
+	iap.failed.connect(_on_iap_failed)
 	sfx = Sfx.new()
 	add_child(sfx)
 	_apply_settings()
@@ -86,6 +89,18 @@ func _ready() -> void:
 	_show_menu()
 	if _args.has("shot"):
 		_setup_shot()
+
+
+func _on_iap_changed(_v) -> void:
+	_refresh_lock()
+
+
+func _on_iap_failed() -> void:
+	_toast("구매를 마치지 못했어요. 잠시 뒤 다시 해 주세요.", Color(1, 0.8, 0.4))
+
+
+func _open_towing() -> void:
+	get_tree().change_scene_to_file("res://towing/main.tscn")
 
 
 func _apply_settings() -> void:
@@ -261,13 +276,17 @@ func _build_menu() -> void:
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 12)
 	mv.add_child(grid)
-	var bs := Vector2(250, 66)
+	var bs := Vector2(250, 58)
 	UiKit.button(grid, "연습 코스", _start_practice, ACCENT, bs)
 	exam_btn = UiKit.button(grid, "모의시험 4분", _start_exam, Color(0.95, 0.42, 0.2), bs)
 	UiKit.button(grid, "단계 드릴", func(): _open("drills"), UiKit.BLUE, bs)
 	UiKit.button(grid, "학습 노트", func(): _open("learn"), Color(0.55, 0.85, 0.6), bs)
 	UiKit.ghost(grid, "기록", func(): _open("records"), bs)
 	UiKit.ghost(grid, "설정", func(): _open("settings"), bs)
+	UiKit.spacer(mv, 2)
+	var tow := UiKit.button(mv, "견인 기능시험 3D  ›", _open_towing, Color(0.36, 0.62, 0.95), Vector2(512, 54), 21)
+	tow.tooltip_text = "소형견인 · 구난 · 대형견인 장내기능시험"
+	tow.visible = not OS.has_feature("web")   # 토스 미니앱(웹)은 지게차만
 	UiKit.spacer(mv, 2)
 	var row2 := UiKit.hbox(mv, 10)
 	unlock_btn = UiKit.button(row2, "전체 해제", _buy, Color(0.45, 0.85, 0.5), Vector2(200, 50), 20)

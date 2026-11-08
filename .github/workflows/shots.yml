@@ -1,0 +1,63 @@
+name: Shots
+
+# Renders screenshots with the app's own shot= mode on a virtual display, so no
+# window ever opens on a desktop. One entry per picture: "<name> <run args...>",
+# entries separated by ";". Towing screens need app=towing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      shots:
+        description: "name arg=value ... ; name arg=value ..."
+        required: true
+      size:
+        description: "w h"
+        required: false
+        default: "1560 720"
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GODOT_VERSION: "4.7.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Virtual display and software Vulkan
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb mesa-vulkan-drivers libvulkan1 > /dev/null
+
+      - name: Install Godot
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && rm godot.zip
+          echo "GODOT=$PWD/Godot_v${GODOT_VERSION}-stable_linux.x86_64" >> "$GITHUB_ENV"
+
+      - name: Render
+        env:
+          SHOTS: ${{ inputs.shots }}
+          SIZE: ${{ inputs.size }}
+        run: |
+          "$GODOT" --headless --path . --import > /dev/null 2>&1 || true
+          mkdir -p out
+          read -r W H <<< "$SIZE"
+          IFS=';' read -ra LINES <<< "$SHOTS"
+          for line in "${LINES[@]}"; do
+            line="$(echo "$line" | xargs)"; [ -z "$line" ] && continue
+            name="${line%% *}"; rest="${line#* }"; [ "$rest" = "$line" ] && rest=""
+            echo "== $name $rest"
+            timeout 300 xvfb-run -a -s "-screen 0 ${W}x${H}x24" "$GODOT" --path . --audio-driver Dummy \
+              --rendering-driver vulkan --resolution ${W}x${H} -- shot="$PWD/out/$name.png" $rest 2>&1 \
+              | grep -E "saved|ERROR|SCRIPT" | grep -v "RGBAFloat" | head -12 || true
+          done
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: out/
