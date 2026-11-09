@@ -23,6 +23,7 @@ var sheet_head: Label
 var body: VBoxContainer
 var next_btn: Button
 var replay_btn: Button
+var total_row: HBoxContainer
 var badge_row: HBoxContainer
 
 
@@ -59,12 +60,14 @@ func _ready() -> void:
 	sheet_head = Kit.label("", 22, Kit.PRIMARY)
 	right.add_child(sheet_head)
 	var sc := ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(800, 330)
+	sc.custom_minimum_size = Vector2(800, 300)
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	right.add_child(sc)
 	body = Kit.vbox(3)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(body)
+	total_row = Kit.hbox(12)   # outside the scroll so the total is always visible
+	right.add_child(total_row)
 	badge_row = Kit.hbox(8)
 	right.add_child(badge_row)
 	var btns := Kit.hbox(10)
@@ -120,6 +123,8 @@ func show_result(exam: Exam, rec: Dictionary, new_badges: Array, has_next: bool,
 	sheet_head.text = Lang.t("tow.res.sheet", [what])
 	for c in body.get_children():
 		c.queue_free()
+	for c in total_row.get_children():
+		c.queue_free()
 	if not free_run:
 		_sheet(exam)
 	for c in badge_row.get_children():
@@ -141,8 +146,7 @@ func _sheet(exam: Exam) -> void:
 		var col := Kit.TEXT if run == "0" else (Kit.RED if run == Lang.t("tow.r.dq") else Kit.AMBER)
 		body.add_child(_cells([Lang.t(r.title), Lang.t(r.crit), TowRules.points_text(r, exam.kind), run], col, 16, r.src != "law"))
 	body.add_child(Kit.divider())
-	var total := Kit.hbox(12)
-	body.add_child(total)
+	var total := total_row
 	total.add_child(Kit.label(Lang.t("tow.res.total", [exam.score]), 22, Kit.GREEN if exam.passed else Kit.RED))
 	var pm := Kit.label(Lang.t("tow.res.pass_mark", [Exam.PASS]), 16, Kit.MUTED)
 	pm.size_flags_vertical = Control.SIZE_SHRINK_CENTER

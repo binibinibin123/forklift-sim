@@ -18,10 +18,10 @@ const FWD := Color(0.4, 0.85, 1.0)
 const REV := Color(1.0, 0.62, 0.3)
 
 
-func setup(c: Course, px := 20.0) -> void:
+func setup(c: Course, px := 20.0, label_room := 0.0) -> void:
 	course = c
 	scale_px = px
-	custom_minimum_size = c.bounds().size * scale_px + Vector2(PAD * 2, PAD * 2)
+	custom_minimum_size = c.bounds().size * scale_px + Vector2(PAD * 2 + label_room, PAD * 2)
 	queue_redraw()
 
 
@@ -90,11 +90,11 @@ func _labels(f: Font) -> void:
 	_text(f, Vector2(c.box.end.x + 0.3, 1.0), Lang.t("course.park_zone"), dim, 13)
 	_text(f, Vector2(c.back_line_x + 0.3, cy + c.hw + 0.5), Lang.t("course.back_line"), w, 14)
 	_text(f, Vector2(c.unload_line_x - 1.4, cy + c.hw + 1.2), Lang.t("course.guide"), Color(1, 0.88, 0.6), 13)
-	_text(f, Vector2(c.drum_pos.x + 0.5, c.drum_pos.y + 0.6), Lang.t("course.drum"), Color(0.7, 0.85, 1.0), 13)
+	_text(f, Vector2(c.drum_pos.x - 3.0, c.drum_pos.y + 1.1), Lang.t("course.drum"), Color(0.7, 0.85, 1.0), 13)
 	_text(f, c.center + Vector2(-2.2, -c.r_out + 1.6), "R 9.4D = %.2f m" % c.r_out, dim, 13)
 	_text(f, c.center + Vector2(2.0, 3.0), "R 7.2D", dim, 13)
 	_text(f, c.center + Vector2(c.hw + 0.3, c.r_in - 1.2), "2.2D", dim, 13)
-	_text(f, Vector2(c.box.end.x + 0.3, cy), "2.4D × (4.0 + 2.0 + 3.0 + 3.0)D", dim, 12)
+	_text(f, Vector2(c.box.end.x + 0.3, cy), "2.4D × (4+2+3+3)D", dim, 12)
 	_text(f, Vector2(c.unload_line_x, c.center.y - c.r_out - 0.4), Lang.t("course.dims", [c.D]), dim, 13)
 	_text(f, Vector2(c.center.x - 6.0, c.center.y + c.r_out + 0.6), Lang.t("course.fwd_rev"), dim, 13)
 

@@ -68,7 +68,8 @@ static func run_until(sim: Sim, ap: Autopilot, stop: int) -> void:
 		return
 	# 3) forward course to the 표준 파렛트
 	var ux := Route.unload_x(c)
-	ap.drive(Route.forward(c, sim.pos.y), false, func(s): return s.pos.x <= ux + 0.02 and absf(s.pos.y - c.center.y) < 1.0 and s.pos.x < c.back_line_x, 1.2)
+	ap.drive(Route.forward(c, sim.pos.y), false, func(s): return s.pos.x <= ux + 1.2 and absf(s.pos.y - c.center.y) < 1.0 and s.pos.x < c.back_line_x, 1.2)
+	ap.drive(Route.line_path(Vector2(sim.pos.x, c.center.y), Vector2(ux - 1.0, c.center.y)), false, func(s): return s.pos.x <= ux + 0.02, 0.3)
 	if stop <= 4:
 		return
 	# 4) lower the moving pallet onto the 표준 파렛트

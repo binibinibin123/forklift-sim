@@ -481,14 +481,14 @@ func _fill_rules(s: Dictionary) -> void:
 	# drawing and order
 	var row := UiKit.hbox(pages.plan, 20)
 	var cv := CourseView.new()
-	cv.setup(course, 21.0)
+	cv.setup(course, 20.0, 170.0)
 	cv.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_child(cv)
 	var ov := UiKit.vbox(row, 8)
 	for i in 8:
 		var h := UiKit.hbox(ov, 10)
 		UiKit.label(h, "%d" % (i + 1), 22, ACCENT, false)
-		var l := UiKit.para(h, Lang.t("order.%d" % (i + 1)), 18, INK, 560)
+		var l := UiKit.para(h, Lang.t("order.%d" % (i + 1)), 17, INK, 520)
 		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
 
@@ -883,7 +883,7 @@ func _update_camera(dt: float) -> void:
 		cam.global_position = eye
 		cam.look_at(c2, Vector3.UP)
 		cam.fov = 50.0
-		cam.h_offset = 3.6
+		cam.h_offset = -4.2
 
 
 ## Measurement point (x, y, height) in sim space -> 3D.
