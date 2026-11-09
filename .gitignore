@@ -4,3 +4,5 @@
 *.import
 shots/
 research/
+# app captures used to compose the store screenshots
+store/raw*/

@@ -26,8 +26,7 @@ BUNDLE = "com.yubinapps.forkliftsim"
 IAP_ID = "com.yubinapps.forkliftsim.unlock"
 IAP_KRW = "5500"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SHOTS = {"ko": [os.path.join(ROOT, "store", "screenshots_marketing", f"m{i}_{n}.png") for i, n in
-              enumerate(["menu", "cab", "side", "result", "large", "small", "wrecker", "towres"], 1)]}
+SHOTS = {"ko": [os.path.join(ROOT, "store", "screenshots_v2", "ko", f"{i}.png") for i in range(1, 6)]}
 EXCLUDE_TERRITORIES = {"CHN"}
 # apps whose review contact and copyright we reuse
 CONTACT_FROM = ["com.yubinapps.forkliftsim", "com.yubinapps.pockettemple", "com.yubinapps.preflight3d"]
