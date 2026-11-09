@@ -35,32 +35,36 @@ def _md():
     return open(os.path.join(ROOT, "store", "listing.md"), encoding="utf-8").read().replace("\r\n", "\n")
 
 
-def _bullet(name):
-    for line in _md().split("\n"):
-        if line.startswith("- " + name + ":"):
-            return line.split(":", 1)[1].strip()
-    raise KeyError(name)
+def _part(loc):
+    head = {"ko": "## ko (primary)", "en-US": "## en-US"}[loc]
+    return _md().split("\n" + head + "\n", 1)[1].split("\n---", 1)[0]
 
 
-def _sec(head):
-    return _md().split("\n## " + head, 1)[1].split("\n", 1)[1].split("\n## ", 1)[0].strip()
+def _inline(text, label):
+    m = re.search(r"^\*\*" + re.escape(label) + r"\*\*:[ \t]*(.+)$", text, re.M)
+    return m.group(1).strip()
+
+
+def _para(text, label):
+    return text.split("\n**" + label + "**:\n", 1)[1].split("\n\n**", 1)[0].strip()
 
 
 def listing(loc):
+    t = _part(loc)
     return {
-        "name": _bullet("앱 이름(30자)"),
-        "subtitle": _bullet("부제(30자)"),
+        "name": _inline(t, "Name (30)"),
+        "subtitle": _inline(t, "Subtitle (30)"),
         "privacyPolicyUrl": "https://binibinibin123.github.io/gentive-app-support/forklift-sim/privacy.html",
         "supportUrl": "https://binibinibin123.github.io/gentive-app-support/forklift-sim/support.html",
-        "keywords": _sec("키워드"),
-        "promotionalText": _sec("프로모션 텍스트"),
-        "description": _sec("설명"),
+        "keywords": _inline(t, "Keywords (100)"),
+        "promotionalText": _para(t, "Promotional text"),
+        "description": _para(t, "Description"),
     }
 
 
-REVIEW_NOTES = _sec("심사 노트")
+REVIEW_NOTES = _md().split("\n## Review notes (English)\n", 1)[1].split("\n## ", 1)[0].split("\n---", 1)[0].strip()
 IAP_TEXT = {"ko": ("전체 해제", "지게차 모의시험과 견인 3종 시험 전부")}
-LOCALES = ("ko",)
+LOCALES = ("ko", "en-US")
 
 
 # ------------------------------------------------------------------ http
@@ -162,14 +166,25 @@ def app_info(app_id):
 
 def set_app_info(app_id):
     info = app_info(app_id)
+    seen = set()
     for loc in call("GET", f"/v1/appInfos/{info['id']}/appInfoLocalizations")["data"]:
         lc = loc["attributes"]["locale"]
         if lc in LOCALES:
+            seen.add(lc)
             L = listing(lc)
             call("PATCH", f"/v1/appInfoLocalizations/{loc['id']}", {"data": {
                 "type": "appInfoLocalizations", "id": loc["id"], "attributes": {
                     "name": L["name"], "subtitle": L["subtitle"], "privacyPolicyUrl": L["privacyPolicyUrl"]}}})
             print("app info set:", lc)
+    for lc in LOCALES:
+        if lc not in seen:   # the English listing is new in this version
+            L = listing(lc)
+            call("POST", "/v1/appInfoLocalizations", {"data": {
+                "type": "appInfoLocalizations", "attributes": {
+                    "locale": lc, "name": L["name"], "subtitle": L["subtitle"],
+                    "privacyPolicyUrl": L["privacyPolicyUrl"]},
+                "relationships": {"appInfo": {"data": {"type": "appInfos", "id": info["id"]}}}}})
+            print("app info added:", lc)
     call("PATCH", f"/v1/appInfos/{info['id']}", {"data": {
         "type": "appInfos", "id": info["id"], "relationships": {
             "primaryCategory": {"data": {"type": "appCategories", "id": "EDUCATION"}}}}})
