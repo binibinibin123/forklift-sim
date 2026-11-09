@@ -49,8 +49,8 @@ var replay_bar: Control
 var screens := {}          # name -> root Control
 var _faults_seen := 0
 var _deduct_seen := 0
-var store := Store.new()
-var iap: Iap
+var store := ForkliftSave.new()
+var iap: ExamUnlock
 var sfx: Sfx
 var exam_btn: Button
 var unlock_btn: Button
@@ -64,16 +64,18 @@ var _menu_angle := 0.6
 
 
 func _ready() -> void:
-	for a in OS.get_cmdline_user_args():
-		var kv := a.split("=", true, 1)
-		_args[kv[0]] = kv[1] if kv.size() > 1 else "1"
+	# run arguments (screenshots in CI) are read only in debug builds
+	if OS.is_debug_build():
+		for a in OS.get_cmdline_user_args():
+			var kv := a.split("=", true, 1)
+			_args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	if _args.get("app", "") == "towing":
 		_open_towing.call_deferred()
 		return
 	store.load_data()
-	# named methods, not lambdas: the shared Iap outlives this scene and drops
+	# named methods, not lambdas: the shared ExamUnlock outlives this scene and drops
 	# method connections by itself when the scene is freed
-	iap = Iap.shared()
+	iap = ExamUnlock.shared()
 	iap.changed.connect(_on_iap_changed)
 	iap.price_known.connect(_on_iap_changed)
 	iap.failed.connect(_on_iap_failed)

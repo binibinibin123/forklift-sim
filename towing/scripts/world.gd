@@ -596,7 +596,7 @@ func _pole(b: Batch, p: Vector2) -> void:
 func _label3d(text: String, p: Vector2, y: float, c: Color) -> void:
 	var l := Label3D.new()
 	l.text = text
-	l.font = load("res://fonts/GowunDodum-Regular.ttf")
+	l.font = load("res://fonts/IBMPlexSansKR-Medium.ttf")
 	l.font_size = 96
 	l.pixel_size = 0.006
 	l.modulate = c
@@ -623,7 +623,7 @@ func _sign(s: Dictionary) -> void:
 	for side in [-1, 1]:
 		var l := Label3D.new()
 		l.text = s.title
-		l.font = load("res://fonts/GowunDodum-Regular.ttf")
+		l.font = load("res://fonts/IBMPlexSansKR-Medium.ttf")
 		l.font_size = 64
 		l.pixel_size = 0.0068
 		l.modulate = Color(0.08, 0.3, 0.62)

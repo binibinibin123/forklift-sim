@@ -1,16 +1,18 @@
-class_name Iap
+class_name ExamUnlock
 extends Node
-## One-time "전체 해제" purchase (forklift full course + mock exam and every
-## towing exam) through StoreKit 2
-## (ios/plugins/ios-in-app-purchase, hrk4649/godot_ios_plugin_iap 0.4.0).
-## In the Toss mini-app (web build) the page's window.aitBridge talks to the
-## Apps in Toss IAP SDK instead (toss/src/bridge.js).
-## Without either (desktop, plain web, tests) everything is open, unless the run
-## argument locked=1 asks for the free version.
+## Access to the full exam set (forklift mock exam + every towing exam).
 ##
-## One shared instance lives under the tree root (Iap.shared()), so the forklift
-## and towing scenes see the same purchase. It caches the last answer in its own
-## file, not in either scene's save, so the two saves never overwrite it.
+## Version 1.0 ships with PAYWALL off: everything is open, no StoreKit request
+## is made and no purchase screen is shown. The one-time purchase code below is
+## kept for a later update and comes back by flipping PAYWALL to true.
+##
+## With PAYWALL on: StoreKit 2 on iOS (ios/plugins/ios-in-app-purchase,
+## hrk4649/godot_ios_plugin_iap 0.4.0); in the Toss mini-app (web build) the
+## page's window.aitBridge (toss/src/bridge.js). One instance lives under the
+## tree root (ExamUnlock.shared()) so the forklift and towing scenes agree; the
+## last answer is cached in its own file.
+
+const PAYWALL := false
 
 signal changed(unlocked: bool)
 signal price_known(price: String)
@@ -18,30 +20,38 @@ signal failed()
 signal settled()   # a purchase, restore or entitlement check finished
 
 const CACHE := "user://unlock.json"
-
 const PRODUCT := "com.yubinapps.forkliftsim.unlock"
 
-var unlocked := false
+var unlocked := true
 var price := ""
 var _sk: Object
-static var _shared: Iap
+static var _shared: ExamUnlock
 var _js: JavaScriptObject
 var _js_cb: JavaScriptObject   # keep a reference or the callback is freed
 
 
-static func shared() -> Iap:
+static func shared() -> ExamUnlock:
 	if _shared == null:
-		_shared = Iap.new()
+		_shared = ExamUnlock.new()
 		(Engine.get_main_loop() as SceneTree).root.add_child.call_deferred(_shared)
 		var locked := false
-		for a in OS.get_cmdline_user_args():
-			if a == "locked" or a.begins_with("locked="):
-				locked = true
+		if OS.is_debug_build():
+			for a in OS.get_cmdline_user_args():
+				if a == "locked" or a.begins_with("locked="):
+					locked = true
 		_shared._start(locked)
 	return _shared
 
 
+## True when a purchase screen may be shown at all.
+static func paywall_on() -> bool:
+	return PAYWALL
+
+
 func _start(force_locked: bool) -> void:
+	if not PAYWALL:
+		unlocked = true
+		return
 	if Engine.has_singleton("IOSInAppPurchase"):
 		unlocked = _cached()
 		_sk = Engine.get_singleton("IOSInAppPurchase")
@@ -61,7 +71,7 @@ func _start(force_locked: bool) -> void:
 
 
 func _cached() -> bool:
-	for path in [CACHE, Store.PATH]:   # Store.PATH held the cache before 2.0
+	for path in [CACHE, ForkliftSave.PATH]:   # ForkliftSave.PATH held the cache before 2.0
 		if FileAccess.file_exists(path):
 			var d = JSON.parse_string(FileAccess.get_file_as_string(path))
 			if d is Dictionary and d.has("unlocked"):
@@ -70,7 +80,9 @@ func _cached() -> bool:
 
 
 func buy() -> void:
-	if _sk:
+	if not PAYWALL:
+		settled.emit()
+	elif _sk:
 		_sk.request("purchase", {"productID": PRODUCT})
 	elif _js:
 		_js.buy()
@@ -80,7 +92,9 @@ func buy() -> void:
 
 
 func restore() -> void:
-	if _sk:
+	if not PAYWALL:
+		settled.emit()
+	elif _sk:
 		_sk.request("appStoreSync", {})
 	elif _js:
 		_js.restore()

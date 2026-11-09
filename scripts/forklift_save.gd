@@ -1,8 +1,8 @@
-class_name Store
+class_name ForkliftSave
 extends RefCounted
-## 기기 저장: 최고 점수, 기록, 설정, 해제 상태 캐시.
+## Forklift exam records on the device: best score, score sheets, drill counts, settings.
 
-const PATH := "user://save.json"
+const PATH := "user://forklift_exam.json"
 const HISTORY_MAX := 40
 
 var data := {
@@ -15,7 +15,6 @@ var data := {
 	"cam": 0,            # 기본 시점
 	"history": [],       # {ts, mode, score, load, unload, pass, time, faults}
 	"drills": {},        # id -> {done, best_time, clean}
-	"unlocked": false,   # 전체 해제 캐시; StoreKit이 기준
 }
 
 

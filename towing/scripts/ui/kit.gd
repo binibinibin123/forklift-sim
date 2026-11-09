@@ -25,7 +25,7 @@ static var theme: Theme
 static func setup() -> void:
 	if theme:
 		return
-	font = load("res://fonts/GowunDodum-Regular.ttf")
+	font = load("res://fonts/IBMPlexSansKR-Medium.ttf")
 	var fv := FontVariation.new()
 	fv.base_font = font
 	var sys := SystemFont.new()

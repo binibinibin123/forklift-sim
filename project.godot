@@ -2,9 +2,14 @@
 config_version=5
 
 [application]
-config/name="지게차·견인 실기"
+config/name="실기 채점관"
 run/main_scene="res://main.tscn"
 config/icon="res://icon.png"
+boot_splash/bg_color=Color(0.105882, 0.121569, 0.141176, 1)
+boot_splash/show_image=true
+boot_splash/image="res://splash.png"
+boot_splash/stretch_mode=1
+boot_splash/use_filter=true
 config/features=PackedStringArray("4.7", "Mobile")
 
 [audio]
@@ -26,4 +31,4 @@ textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=2
 
 [gui]
-theme/custom_font="res://fonts/GowunDodum-Regular.ttf"
+theme/custom_font="res://fonts/IBMPlexSansKR-Medium.ttf"

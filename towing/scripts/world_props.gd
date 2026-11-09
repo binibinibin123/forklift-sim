@@ -212,7 +212,7 @@ func _labels() -> void:
 	var north := bpos + Vector2(0, bsize.z * 0.5)
 	var l := Label3D.new()
 	l.text = "운전면허시험장"
-	l.font = load("res://fonts/GowunDodum-Regular.ttf")
+	l.font = load("res://fonts/IBMPlexSansKR-Medium.ttf")
 	l.font_size = 96
 	l.pixel_size = 0.0105
 	l.modulate = Color(0.06, 0.26, 0.58)

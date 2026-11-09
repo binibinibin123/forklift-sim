@@ -1,7 +1,7 @@
 class_name Purchases
 extends Node
 ## The towing screens' view of the app's single "전체 해제" purchase.
-## The purchase itself lives in the shared Iap (res://scripts/iap.gd), so one
+## The purchase itself lives in the shared ExamUnlock (res://scripts/exam_unlock.gd), so one
 ## unlock opens the forklift course and every towing exam. This node keeps the
 ## API the towing screens were written against: unlocked, price, busy, buy(),
 ## restore() and the changed / price_known / busy_changed / failed signals.
@@ -12,7 +12,7 @@ signal busy_changed(busy: bool)
 signal failed(reason: String)
 
 var busy := false
-var _iap: Iap
+var _iap: ExamUnlock
 
 
 var unlocked: bool:
@@ -26,8 +26,8 @@ var price: String:
 
 
 func setup(_store: TowStore, _force_locked: bool) -> void:
-	# `locked` on the command line is read by Iap.shared() itself
-	_iap = Iap.shared()
+	# `locked` on the command line is read by ExamUnlock.shared() itself
+	_iap = ExamUnlock.shared()
 	_iap.changed.connect(_on_changed)
 	_iap.price_known.connect(_on_price)
 	_iap.failed.connect(_on_failed)
