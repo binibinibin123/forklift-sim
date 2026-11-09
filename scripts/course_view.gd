@@ -1,22 +1,27 @@
 class_name CourseView
 extends Control
-## 코스 도면(치수·동선). 학습 화면과 결과 화면에서 사용.
+## Course plan drawn from the Q-Net drawing: D-unit dimensions, forward (solid) and
+## reverse (dashed) lines, the run's trail and fault marks. Rulebook and score sheet.
 
 var course: Course
 var show_dims := true
 var show_routes := true
-var trail: PackedVector2Array = []       # 주행 궤적(결과 화면)
-var fault_pos: Array = []                # 실격 지점
-var scale_px := 26.0
+var trail: PackedVector2Array = []
+var fault_pos: Array = []
+var scale_px := 20.0
 
-const PAD := 44.0
+const PAD := 30.0
+const FILL := Color(0.52, 0.53, 0.52)
+const BG := Color(0.33, 0.34, 0.35)
+const YEL := Color(0.98, 0.78, 0.12)
+const FWD := Color(0.4, 0.85, 1.0)
+const REV := Color(1.0, 0.62, 0.3)
 
 
-func setup(c: Course, px := 26.0) -> void:
+func setup(c: Course, px := 20.0) -> void:
 	course = c
 	scale_px = px
-	var b := c.bounds()
-	custom_minimum_size = b.size * scale_px + Vector2(PAD * 2, PAD * 2)
+	custom_minimum_size = c.bounds().size * scale_px + Vector2(PAD * 2, PAD * 2)
 	queue_redraw()
 
 
@@ -25,51 +30,78 @@ func _to(p: Vector2) -> Vector2:
 	return Vector2((p.x - b.position.x) * scale_px + PAD, (b.end.y - p.y) * scale_px + PAD)
 
 
+func _rect(r: Rect2, col: Color) -> void:
+	draw_rect(Rect2(_to(Vector2(r.position.x, r.end.y)), r.size * scale_px), col)
+
+
 func _draw() -> void:
 	if course == null:
 		return
+	var c := course
 	var f := get_theme_default_font()
-	var b := course.bounds()
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.36, 0.37, 0.38, 1.0))
-	for r in course.rects:
-		draw_rect(Rect2(_to(Vector2(r.position.x, r.end.y)), r.size * scale_px), Color(0.5, 0.51, 0.5))
-	for seg in course.boundary_segments():
-		draw_line(_to(seg[0]), _to(seg[1]), Color(0.98, 0.78, 0.12), 3.0)
-	# 출발선·후진선
-	var sr: Rect2 = course.zones["start"]
-	draw_line(_to(Vector2(sr.position.x, course.start_line_y)), _to(Vector2(sr.end.x, course.start_line_y)), Color.WHITE, 3.0)
-	var top_r := course.rects[4]
-	draw_line(_to(Vector2(course.back_line_x, top_r.position.y)), _to(Vector2(course.back_line_x, top_r.end.y)), Color.WHITE, 3.0)
-	# 하역 표시, 표준 팔레트, 드럼
-	_square(course.unload_target, course.unload_heading, Sim.PALLET + 0.04, Color.WHITE, 2.0)
-	_square(course.guide_pos, course.guide_heading, Sim.PALLET, Color(0.95, 0.75, 0.3), 0.0, true)
-	draw_circle(_to(course.drum_pos), course.drum_radius * scale_px, Color(0.15, 0.4, 0.75))
-	_square(course.pallet_start, course.pallet_start_heading, Sim.PALLET, Color(0.85, 0.65, 0.4), 2.0)
-	# 글씨
-	if show_dims:
-		_labels(f, sr, top_r)
+	draw_rect(Rect2(Vector2.ZERO, size), BG)
+	# surface
+	for r in [c.box, c.conn, c.stub]:
+		_rect(r, FILL)
+	var n := 120
+	for i in n:
+		var a0 := TAU * i / n
+		var a1 := TAU * (i + 1) / n
+		var u0 := Vector2(cos(a0), sin(a0))
+		var u1 := Vector2(cos(a1), sin(a1))
+		draw_colored_polygon(PackedVector2Array([_to(c.center + u0 * c.r_in), _to(c.center + u0 * c.r_out), _to(c.center + u1 * c.r_out), _to(c.center + u1 * c.r_in)]), FILL)
+	var L := sqrt(c.r_out * c.r_out - c.hw * c.hw)
+	_rect(Rect2(c.center + Vector2(-L, -c.hw), Vector2(2 * L, 2 * c.hw)), FILL)
+	_rect(Rect2(c.center + Vector2(-c.hw, -L), Vector2(2 * c.hw, 2 * L)), FILL)
+	# edges and white lines
+	for pl in c.boundary_polylines():
+		var pts := PackedVector2Array()
+		for p in pl:
+			pts.append(_to(p))
+		draw_polyline(pts, YEL, 2.0)
+	var bx := c.box
+	var cy := c.center.y
+	for seg in [[Vector2(bx.position.x, c.start_line_y), Vector2(bx.end.x, c.start_line_y)],
+			[Vector2(bx.position.x, c.park_line_y), Vector2(bx.end.x, c.park_line_y)],
+			[Vector2(c.back_line_x, cy - c.hw), Vector2(c.back_line_x, cy + c.hw)]]:
+		draw_line(_to(seg[0]), _to(seg[1]), Color.WHITE, 3.0)
+	# pallets and drum
+	_square(c.guide_pos, c.guide_heading, Sim.PALLET, Color(0.95, 0.75, 0.3), 0.0, true)
+	draw_circle(_to(c.drum_pos), maxf(c.drum_radius * scale_px, 4.0), Color(0.2, 0.45, 0.85))
+	_square(c.pallet_start, c.pallet_start_heading, Sim.PALLET, Color(0.9, 0.7, 0.45), 2.0)
 	if show_routes:
-		var fwd := [Vector2(0, 2.6), Vector2(0, 6.4), Vector2(-6.6, 6.4), Vector2(-6.6, 13.6), Vector2(5.0, 13.6)]
-		_route(fwd, Color(0.4, 0.85, 1.0), "전진")
-		var rev := [Vector2(4.4, 14.4), Vector2(-5.8, 14.4), Vector2(-5.8, 7.2), Vector2(0.8, 7.2), Vector2(0.8, 2.0)]
-		_route(rev, Color(1.0, 0.6, 0.3), "후진")
+		_route(Route.line_path(Vector2(0.35, c.start_pos.y), Vector2(0.35, c.drum_pos.y - 1.2)), FWD, false)
+		_route(Route.line_path(Vector2(-0.35, c.drum_pos.y - 1.2), Vector2(-0.35, 9.6)), REV, true)
+		_route(Route.forward(c, 9.6), FWD, false)
+		_route(Route.reverse(c), REV, true)
 	if show_dims:
-		for i in course.rects.size():
-			var r: Rect2 = course.rects[i]
-			var c := _to(Vector2(r.get_center().x, r.end.y))
-			draw_string(f, c + Vector2(-26, 16), "%.1f m" % r.size.x, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.75))
-			var cl := _to(Vector2(r.position.x, r.get_center().y))
-			draw_string(f, cl + Vector2(4, 4), "%.1f" % r.size.y, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.75))
-		draw_string(f, Vector2(8, size.y - 10), "※ 치수는 공개 자료 기준 추정치. 시험장마다 조금씩 다를 수 있어요.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.6))
+		_labels(f)
 	_overlays()
 
 
-func _labels(f: Font, sr: Rect2, top_r: Rect2) -> void:
-	draw_string(f, _to(Vector2(sr.position.x, course.start_line_y - 0.5)), "출발·도착선", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-	draw_string(f, _to(Vector2(course.back_line_x + 0.1, top_r.end.y + 0.3)), "후진선", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-	draw_string(f, _to(Vector2(course.drum_pos.x + 0.5, course.drum_pos.y)), "드럼+팔레트", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-	draw_string(f, _to(Vector2(course.unload_target.x - 1.0, course.unload_target.y - 1.0)), "하역 위치", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-	draw_string(f, _to(Vector2(course.guide_pos.x - 0.6, course.guide_pos.y + 0.9)), "표준 팔레트", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 0.9, 0.6))
+func _labels(f: Font) -> void:
+	var c := course
+	var cy := c.center.y
+	var w := Color(1, 1, 1, 0.92)
+	var dim := Color(1, 1, 1, 0.7)
+	_text(f, Vector2(c.box.end.x + 0.3, c.start_line_y), Lang.t("course.start_line"), w, 14)
+	_text(f, Vector2(c.box.end.x + 0.3, c.park_line_y), Lang.t("course.park_line"), w, 14)
+	_text(f, Vector2(c.box.end.x + 0.3, c.load_line_y), Lang.t("course.load_line"), w, 14)
+	_text(f, Vector2(c.box.end.x + 0.3, 1.0), Lang.t("course.park_zone"), dim, 13)
+	_text(f, Vector2(c.back_line_x + 0.3, cy + c.hw + 0.5), Lang.t("course.back_line"), w, 14)
+	_text(f, Vector2(c.unload_line_x - 1.4, cy + c.hw + 1.2), Lang.t("course.guide"), Color(1, 0.88, 0.6), 13)
+	_text(f, Vector2(c.drum_pos.x + 0.5, c.drum_pos.y + 0.6), Lang.t("course.drum"), Color(0.7, 0.85, 1.0), 13)
+	_text(f, c.center + Vector2(-2.2, -c.r_out + 1.6), "R 9.4D = %.2f m" % c.r_out, dim, 13)
+	_text(f, c.center + Vector2(2.0, 3.0), "R 7.2D", dim, 13)
+	_text(f, c.center + Vector2(c.hw + 0.3, c.r_in - 1.2), "2.2D", dim, 13)
+	_text(f, Vector2(c.box.end.x + 0.3, cy), "2.4D × (4.0 + 2.0 + 3.0 + 3.0)D", dim, 12)
+	_text(f, Vector2(c.unload_line_x, c.center.y - c.r_out - 0.4), Lang.t("course.dims", [c.D]), dim, 13)
+	_text(f, Vector2(c.center.x - 6.0, c.center.y + c.r_out + 0.6), Lang.t("course.fwd_rev"), dim, 13)
+
+
+func _text(f: Font, p: Vector2, t: String, col: Color, fs: int) -> void:
+	draw_string_outline(f, _to(p), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, Color(0, 0, 0, 0.6))
+	draw_string(f, _to(p), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
 
 func _overlays() -> void:
@@ -97,14 +129,18 @@ func _square(c: Vector2, ang: float, s: float, col: Color, w: float, fill := fal
 		draw_polyline(pts, col, w)
 
 
-func _route(pts: Array, col: Color, name: String) -> void:
-	var sp := PackedVector2Array()
-	for p in pts:
-		sp.append(_to(p))
-	draw_polyline(sp, Color(col, 0.85), 4.0)
-	var a: Vector2 = sp[-2]
-	var bb: Vector2 = sp[-1]
+func _route(path: PackedVector2Array, col: Color, dashed: bool) -> void:
+	var pts := PackedVector2Array()
+	for i in range(0, path.size(), 4):
+		pts.append(_to(path[i]))
+	pts.append(_to(path[-1]))
+	if dashed:
+		for i in range(0, pts.size() - 1, 4):
+			draw_line(pts[i], pts[mini(i + 2, pts.size() - 1)], Color(col, 0.9), 2.5)
+	else:
+		draw_polyline(pts, Color(col, 0.9), 2.5)
+	var a: Vector2 = pts[maxi(pts.size() - 4, 0)]
+	var bb: Vector2 = pts[-1]
 	var d := (bb - a).normalized()
-	var n := Vector2(-d.y, d.x)
-	draw_colored_polygon(PackedVector2Array([bb + d * 10, bb - d * 6 + n * 8, bb - d * 6 - n * 8]), col)
-	draw_string(get_theme_default_font(), sp[1] + Vector2(6, -6), name, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col)
+	var nn := Vector2(-d.y, d.x)
+	draw_colored_polygon(PackedVector2Array([bb + d * 9, bb - d * 5 + nn * 7, bb - d * 5 - nn * 7]), col)

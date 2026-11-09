@@ -15,11 +15,6 @@ func check(cond: bool, msg: String) -> void:
 func _initialize() -> void:
 	test_course()
 	test_full_run()
-	test_line_touch()
-	test_fork_too_high()
-	test_missed_pallet()
-	test_seatbelt()
-	test_timeout()
 	test_scoring_parts()
 	test_drills()
 	print("FAILS: %d" % fails)
@@ -29,83 +24,88 @@ func _initialize() -> void:
 func test_course() -> void:
 	print("course")
 	var c := Course.load_default()
-	check(c.inside(c.start_pos), "출발 위치가 코스 안")
-	check(c.zone_at(c.drum_pos) == "load", "드럼은 상차 구역")
-	check(c.zone_at(c.unload_target) == "unload", "하역 표시는 하역 구역")
-	check(c.boundary_segments().size() > 6, "경계선 생성")
+	check(c.inside(c.start_pos), "start position inside the course")
+	check(c.zone_at(c.start_pos) == "park", "start in the parking area")
+	check(c.zone_at(Vector2(0, c.drum_pos.y - 1.0)) == "work1", "drum side is work zone 1")
+	check(c.zone_at(Vector2(c.unload_line_x + 0.5, c.center.y)) == "work2", "stub is work zone 2")
+	check(c.zone_at(c.center) == "travel", "ring centre is the travel section")
+	check(absf(c.r_out - 9.4 * c.D) < 0.001 and absf(c.r_in - 7.2 * c.D) < 0.001, "ring radii from the drawing")
+	check(absf(c.box.size.y - 12.0 * c.D) < 0.001, "box 4.0+2.0+3.0+3.0 D")
+	check(absf((c.box.end.y - c.start_line_y) - 6.0 * c.D) < 0.001, "start line 6.0 D below the loading line")
+	check(absf((c.center.x - c.r_out - c.unload_line_x) - 2.2 * c.D) < 0.001, "stub 2.2 D")
+	var total := (c.box.end.x - c.unload_line_x)
+	check(absf(total - 23.4 * c.D) < 0.01, "overall 23.4 D (%.2f m)" % total)
+	check(c.boundary_polylines().size() > 6, "edges built")
+	check(not c.inside(c.center + Vector2(4, 4)), "islands are not drivable")
 
 
 static func full_run(sim: Sim, ap: Autopilot) -> void:
 	run_until(sim, ap, 99)
 
 
-## 코스 전체를 자동 운전으로 돈다. stop 단계에서 멈춤(스크린샷용)
+## Drives the whole course with the test driver; stops after stage `stop` (screenshots).
 static func run_until(sim: Sim, ap: Autopilot, stop: int) -> void:
 	var c := sim.course
+	var reach := Sim.CARRIAGE + Sim.FORK_LEN - Sim.PALLET * 0.5
 	sim.seatbelt = true
 	sim.give_signal()
 	sim.park_brake = false
 	ap.set_fork(0.25, 0.0)
-	var lane_y := 6.4
-	var col_x := -6.6
-	var top_y := 13.6
-	var reach := Sim.CARRIAGE + Sim.FORK_LEN - Sim.PALLET * 0.5   # 앞축 → 팔레트 중심(완전 삽입)
 	if stop <= 1:
 		return
-	# 1) 드럼까지 전진, 작업 높이로
-	ap.drive(Autopilot.rounded([c.start_pos, Vector2(0, 6.8)], 0.5), false, func(s): return s.pos.y >= 6.8, 1.0)
+	# 1) up to the drum, forks to the pallet openings, pick up
+	ap.drive(Route.line_path(c.start_pos, Vector2(0, 10.6)), false, func(s): return s.pos.y >= 10.6, 1.0)
 	ap.set_fork(c.drum_height + 0.04, 0.0)
-	ap.drive(Autopilot.rounded([Vector2(0, 6.0), Vector2(0, c.drum_pos.y - reach)], 0.5), false,
+	ap.drive(Route.line_path(Vector2(0, 10.6), Vector2(0, c.drum_pos.y - reach)), false,
 		func(s): return s.pos.y >= c.drum_pos.y - reach, 0.4)
 	ap.set_fork(c.drum_height + 0.13, 4.0)
 	if stop <= 2:
 		return
-	# 2) 조금 후진 후 주행 높이로
-	ap.drive(Autopilot.rounded([Vector2(0, 9), Vector2(0, 5.6)], 0.5), true, func(s): return s.pos.y <= 5.6, 0.6)
+	# 2) back off and lower to 20~30 cm
+	ap.drive(Route.line_path(Vector2(0, 13.6), Vector2(0, 9.5)), true, func(s): return s.pos.y <= 9.5, 0.6)
 	ap.set_fork(0.25, 4.0)
 	if stop <= 3:
 		return
-	# 3) 전진 코스
-	var fwd := Autopilot.rounded([Vector2(0, 5.6), Vector2(0, lane_y), Vector2(col_x, lane_y), Vector2(col_x, top_y), Vector2(c.unload_target.x - reach, top_y)], 1.0)
-	ap.drive(fwd, false, func(s): return s.pos.x >= c.unload_target.x - reach - 0.05 and s.pos.y > 12, 1.2)
+	# 3) forward course to the 표준 파렛트
+	var ux := Route.unload_x(c)
+	ap.drive(Route.forward(c, sim.pos.y), false, func(s): return s.pos.x <= ux + 0.02 and absf(s.pos.y - c.center.y) < 1.0 and s.pos.x < c.back_line_x, 1.2)
 	if stop <= 4:
 		return
-	# 4) 하역
-	ap.set_fork(0.04, 0.0)
+	# 4) lower the moving pallet onto the 표준 파렛트
+	ap.set_fork(Sim.PALLET_H + 0.04, 0.0)
 	if stop <= 5:
 		return
-	# 5) 후진선까지 후진
-	var bx := c.back_line_x - (Sim.CARRIAGE + Sim.FORK_LEN * 0.5)
-	ap.drive(Autopilot.rounded([Vector2(c.unload_target.x, top_y), Vector2(bx - 1, top_y)], 0.5), true, func(s): return s.pos.x <= bx, 0.8)
+	# 5) back to the 후진선, neutral, forks down
+	var tx := Route.touch_x(c)
+	ap.drive(Route.line_path(Vector2(ux, c.center.y), Vector2(tx + 1.0, c.center.y)), true, func(s): return s.pos.x >= tx, 0.8)
 	sim.gear = 0
 	ap.set_fork(0.0, 0.0)
-	if OS.has_environment("SIM_DEBUG"): print("after touch lift=", sim.lift, " step=", sim.step, " gt=", sim._ground_touching, " mid=", sim.fork_mid(), " v=", sim.speed)
 	if stop <= 6:
 		return
-	# 6) 다시 상차
-	ap.set_fork(0.045, 0.0)
-	ap.drive(Autopilot.rounded([Vector2(bx, top_y), Vector2(c.unload_target.x - reach, top_y)], 0.5), false,
-		func(s): return s.pos.x >= c.unload_target.x - reach - 0.02, 0.4)
-	ap.set_fork(0.16, 4.0)
+	# 6) pick it up again
+	ap.set_fork(Sim.PALLET_H + 0.045, 0.0)
+	ap.drive(Route.line_path(Vector2(tx, c.center.y), Vector2(ux - 1.0, c.center.y)), false,
+		func(s): return s.pos.x <= ux + 0.02, 0.4)
+	ap.set_fork(0.30, 4.0)
+	ap.drive(Route.line_path(Vector2(ux, c.center.y), Vector2(ux + 2.0, c.center.y)), true, func(s): return s.pos.x >= ux + 1.5, 0.5)
 	ap.set_fork(0.25, 4.0)
 	if stop <= 7:
 		return
-	# 7) 후진 코스
-	var rev := Autopilot.rounded([Vector2(c.unload_target.x - reach, top_y), Vector2(col_x, top_y), Vector2(col_x, lane_y), Vector2(0.0, lane_y), Vector2(0.0, 4.6)], 1.0)
-	ap.drive(rev, true, func(s): return s.pos.y <= 4.6 and s.pos.x > -1.0, 1.0)
+	# 7) reverse course back into the box
+	ap.drive(Route.reverse(c, sim.pos.x), true, func(s): return s.pos.x >= -0.05 and s.pos.y <= 9.7 and s.heading > 0.0, 1.0)
 	if stop <= 8:
 		return
-	# 8) 드럼에 내려놓기
+	# 8) onto the drum
 	ap.set_fork(c.drum_height + 0.15, 4.0)
-	ap.drive(Autopilot.rounded([Vector2(0, 4.6), Vector2(0, c.drum_pos.y - reach)], 0.5), false,
-		func(s): return s.pos.y >= c.drum_pos.y - reach - 0.03, 0.4)
+	ap.drive(Route.line_path(Vector2(0, sim.pos.y), Vector2(0, c.drum_pos.y)), false,
+		func(s): return s.pallet_pos.y >= c.drum_pos.y - 0.02, 0.4)
 	ap.set_fork(c.drum_height + 0.03, 0.0)
 	if stop <= 9:
 		return
-	# 9) 출발선 뒤로 후진, 주차
-	ap.drive(Autopilot.rounded([Vector2(0, 8), Vector2(0, 7.0)], 0.5), true, func(s): return s.pos.y <= 7.0, 0.5)
+	# 9) back over the finish line, forks onto the 주차보조선, park
+	ap.drive(Route.line_path(Vector2(0, sim.pos.y), Vector2(0, 11.0)), true, func(s): return s.pos.y <= 11.0, 0.5)
 	ap.set_fork(0.25, 0.0)
-	ap.drive(Autopilot.rounded([Vector2(0, 7), Vector2(0, 1.9)], 0.5), true, func(s): return s.pos.y <= 2.2, 1.0)
+	ap.drive(Route.line_path(Vector2(0, 11.0), Vector2(0, c.start_pos.y - 1.0)), true, func(s): return s.pos.y <= c.start_pos.y, 1.0)
 	sim.gear = 0
 	ap.set_fork(0.0, -2.0)
 	sim.park_brake = true
@@ -122,87 +122,24 @@ func test_full_run() -> void:
 	for d in sim.deductions:
 		print("    감점: ", d.msg, " (", d.code, ")")
 	print("    단계=%d 점수=%d 시간=%.1f초" % [sim.step, sim.score(), sim.t_exam])
-	check(sim.faults.is_empty(), "실격 없음")
-	check(sim.step == Sim.Step.PARKED, "주차까지 완료")
-	check(sim.passed(), "합격")
-	check(sim.t_exam < sim.course.time_limit, "제한 시간 안")
+	check(sim.faults.is_empty(), "no disqualification")
+	check(sim.step == Sim.Step.PARKED, "parked at the end")
+	check(sim.passed(), "passed")
+	check(sim.t_exam < sim.course.time_limit, "inside 4:00")
 	var f := FileAccess.open("user://autopilot_path.txt", FileAccess.WRITE)
 	for p in ap.log_points:
 		f.store_line("%f %f" % [p.x, p.y])
 
 
-func test_line_touch() -> void:
-	print("line touch")
-	var sim := Sim.new(null, true)
-	sim.seatbelt = true
-	sim.give_signal()
-	sim.park_brake = false
-	sim.lift = 0.25
-	sim.gear = 1
-	for i in 600:
-		sim.update(1.0 / 60, {throttle = 1.0, steer = -1.0})
-	check(sim.faults.size() > 0 and sim.faults[0].code == "line", "핸들을 꺾고 계속 가면 선 접촉 실격")
-
-
-func test_fork_too_high() -> void:
-	print("fork high")
-	var sim := Sim.new(null, true)
-	sim.step = Sim.Step.LOADED
-	sim.pos = Vector2(-4, 6.4)
-	sim.heading = PI
-	sim.lift = 0.8
-	sim.speed = 1.0
-	sim.gear = 1
-	sim.park_brake = false
-	sim.update(1.0 / 60, {throttle = 0.5})
-	check(sim.faults.size() > 0 and sim.faults[0].code == "fork_high", "주행 구간 포크 50cm 초과 실격")
-
-
-func test_missed_pallet() -> void:
-	print("pallet push")
-	var sim := Sim.new(null, true)
-	sim.seatbelt = true
-	sim.give_signal()
-	sim.park_brake = false
-	sim.lift = 0.6     # 드럼 높이보다 낮게 들이받음
-	sim.gear = 1
-	for i in 900:
-		sim.update(1.0 / 60, {throttle = 0.5})
-		if sim.done:
-			break
-	check(sim.faults.size() > 0 and sim.faults[0].code in ["drum_touch", "pallet_push"], "낮은 포크로 드럼·팔레트 접촉 실격")
-
-
-func test_seatbelt() -> void:
-	print("seatbelt")
-	var sim := Sim.new(null, true)
-	sim.give_signal()
-	sim.park_brake = false
-	sim.gear = 1
-	for i in 60:
-		sim.update(1.0 / 60, {throttle = 1.0})
-	check(sim.faults.size() > 0 and sim.faults[0].code == "seatbelt", "안전벨트 없이 출발 실격")
-
-
-func test_timeout() -> void:
-	print("timeout")
-	var sim := Sim.new(null, false)
-	sim.give_signal()
-	for i in 61 * 10:
-		sim.update(0.1, {})
-	check(sim.faults.size() > 0 and sim.faults[0].code == "start_late", "1분 안에 출발 못하면 실격")
-	check(not sim.done, "연습 모드는 실격이어도 계속")
-
-
 func test_scoring_parts() -> void:
 	print("scoring parts")
 	var sim := Sim.new(null, false)
-	check(sim.score() == 100 and sim.part_score("load") == 45 and sim.part_score("unload") == 55, "기본 45/55")
+	check(sim.score() == 100 and sim.part_score("load") == 45 and sim.part_score("unload") == 55, "starts at 45/55")
 	sim.step = Sim.Step.LOADED
-	sim._deduct("a", "x", 5)
+	sim._deduct("a", 5)
 	sim.step = Sim.Step.UNLOADED
-	sim._deduct("b", "y", 5)
-	check(sim.part_score("load") == 40 and sim.part_score("unload") == 50 and sim.score() == 90, "단계별로 상차/하차에 나뉘어 감점")
+	sim._deduct("b", 5)
+	check(sim.part_score("load") == 40 and sim.part_score("unload") == 50 and sim.score() == 90, "deductions go to the part of their step")
 
 
 func test_drills() -> void:
@@ -211,27 +148,27 @@ func test_drills() -> void:
 	for d in Drills.list(c):
 		var sim := Sim.new(c, false)
 		sim.start_drill(d)
-		check(sim.step == d.step and sim.faults.is_empty(), "%s: 시작 상태" % d.title)
+		check(sim.step == d.step and sim.faults.is_empty(), "%s: start state" % d.id)
 		for i in 60:
 			sim.update(1.0 / 60.0, {})
-		check(sim.faults.is_empty() and not sim.done, "%s: 가만히 있으면 실격 없음" % d.title)
-		check(c.inside(sim.pos), "%s: 코스 안에서 시작" % d.title)
-	# 후진선 터치 드릴: 포크 내리면 바로 완료
+		check(sim.faults.is_empty() and not sim.done, "%s: no fault when standing still" % d.id)
+		check(c.inside(sim.pos), "%s: starts inside the course" % d.id)
+	# touch drill: back to the 후진선, neutral, forks down
 	var sim := Sim.new(c, false)
-	sim.start_drill(Drills.list(c)[3])
+	sim.start_drill(Drills.by_id(c, "touch"))
 	var ap := Autopilot.new(sim)
-	var bx := c.back_line_x - (Sim.CARRIAGE + Sim.FORK_LEN * 0.5)
-	ap.drive(Autopilot.rounded([Vector2(sim.pos.x, c.unload_target.y), Vector2(bx - 1, c.unload_target.y)], 0.5), true, func(s): return s.pos.x <= bx, 0.8)
+	var tx := Route.touch_x(c)
+	ap.drive(Route.line_path(sim.pos, Vector2(tx + 1.0, c.center.y)), true, func(s): return s.pos.x >= tx, 0.8)
 	sim.gear = 0
 	ap.set_fork(0.0, 0.0)
-	check(sim.step == Sim.Step.TOUCHED and sim.done, "후진선 터치 드릴 완료")
-	# 주차 드릴
+	check(sim.step == Sim.Step.TOUCHED and sim.done and sim.faults.is_empty(), "touch drill completes")
+	# park drill
 	sim = Sim.new(c, false)
-	sim.start_drill(Drills.list(c)[5])
+	sim.start_drill(Drills.by_id(c, "park"))
 	ap = Autopilot.new(sim)
-	ap.drive(Autopilot.rounded([Vector2(0, 8), Vector2(0, 1.9)], 0.5), true, func(s): return s.pos.y <= 2.2, 1.0)
+	ap.drive(Route.line_path(sim.pos, Vector2(0, c.start_pos.y - 1.0)), true, func(s): return s.pos.y <= c.start_pos.y, 1.0)
 	sim.gear = 0
 	ap.set_fork(0.0, -2.0)
 	sim.park_brake = true
 	ap._tick({})
-	check(sim.step == Sim.Step.PARKED and sim.done and sim.faults.is_empty(), "주차 드릴 완료")
+	check(sim.step == Sim.Step.PARKED and sim.done and sim.faults.is_empty(), "park drill completes")

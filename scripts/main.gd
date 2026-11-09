@@ -1,16 +1,17 @@
 extends Node3D
-## 지게차 실기 3D — 메인: 장면, UI, 상태(메뉴/주행/결과/리플레이), 소리.
+## 실기 채점관 — home (two exam cards) and the forklift exam: scene, HUD, freeze frame,
+## rulebook, score sheet, replay. The towing exam lives in res://towing/main.tscn.
 
-enum State { MENU, RUN, RESULT, REPLAY }
+enum State { MENU, RUN, FREEZE, RESULT, REPLAY }
 enum Cam { CAB, CHASE, SIDE, TOP }
-enum Mode { PRACTICE, EXAM, DRILL }
-const CAM_NAMES := ["운전석", "뒤에서", "포크 옆", "위에서"]
+enum Mode { PRACTICE, EXAM, DRILL, RULE }
 
 const INK := UiKit.INK
 const ACCENT := UiKit.ACCENT
 const RED := UiKit.RED
 const GREEN := UiKit.GREEN
 const SUPPORT_URL := "https://binibinibin123.github.io/gentive-app-support/forklift-sim/support.html"
+const SIGNAL_WAIT := 3.0          # exam day: seconds from "ready" to the whistle
 
 var course: Course
 var sim: Sim
@@ -25,13 +26,16 @@ var mode := Mode.PRACTICE
 var exam := false
 var drill: Dictionary = {}
 var drills: Array = []
+var signal_wait := 0.0
 
-# 리플레이
+# replay recording: [pos, heading, steer, lift, tilt, pallet_pos, pallet_heading, pallet_base, fallen, t_exam]
 var frames: Array = []
 var replay_i := 0.0
 var replay_from := 0
+var freeze_item: Dictionary = {}
+var freeze_is_fault := false
+var freeze_frame := 0
 
-# UI
 var ui: Control
 var controls: Controls
 var hud: Label
@@ -40,27 +44,29 @@ var step_dots: Control
 var gauge: Control
 var toast: Label
 var toast_t := 0.0
+var big: Label
 var minimap: Control
 var menu_panel: Control
 var result_panel: Control
 var result_body: VBoxContainer
 var result_course: CourseView
 var replay_bar: Control
-var screens := {}          # name -> root Control
+var replay_slider: HSlider
+var freeze_panel: Control
+var freeze_body: VBoxContainer
+var freeze_slider: HSlider
+var overlay: Control
+var screens := {}
 var _faults_seen := 0
 var _deduct_seen := 0
 var store := ForkliftSave.new()
-var iap: ExamUnlock
+var unlock: ExamUnlock
 var sfx: Sfx
-var exam_btn: Button
-var unlock_btn: Button
-var restore_btn: Button
 var stats_label: Label
-var unlock_panel: Control
-var unlock_text: Label
 var _args := {}
 var _shot_frames := -1
 var _menu_angle := 0.6
+var _slider_lock := false
 
 
 func _ready() -> void:
@@ -73,12 +79,7 @@ func _ready() -> void:
 		_open_towing.call_deferred()
 		return
 	store.load_data()
-	# named methods, not lambdas: the shared ExamUnlock outlives this scene and drops
-	# method connections by itself when the scene is freed
-	iap = ExamUnlock.shared()
-	iap.changed.connect(_on_iap_changed)
-	iap.price_known.connect(_on_iap_changed)
-	iap.failed.connect(_on_iap_failed)
+	unlock = ExamUnlock.shared()
 	sfx = Sfx.new()
 	add_child(sfx)
 	_apply_settings()
@@ -87,18 +88,9 @@ func _ready() -> void:
 	sim = Sim.new(course, true)
 	_build_scene()
 	_build_ui()
-	_refresh_lock()
 	_show_menu()
 	if _args.has("shot"):
 		_setup_shot()
-
-
-func _on_iap_changed(_v) -> void:
-	_refresh_lock()
-
-
-func _on_iap_failed() -> void:
-	_toast("구매를 마치지 못했어요. 잠시 뒤 다시 해 주세요.", Color(1, 0.8, 0.4))
 
 
 func _open_towing() -> void:
@@ -112,7 +104,7 @@ func _apply_settings() -> void:
 		controls.sens = float(store.data.steer_sens)
 
 
-# ---------- 장면 ----------
+# ---------- scene ----------
 func _build_scene() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
@@ -196,7 +188,12 @@ func _build_ui() -> void:
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(ui)
 
-	# 위 가운데: 시간·단계·진행 점
+	overlay = Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.draw.connect(_draw_overlay)
+	ui.add_child(overlay)
+
 	var top := VBoxContainer.new()
 	top.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	top.position = Vector2(-330, 10)
@@ -217,13 +214,20 @@ func _build_ui() -> void:
 
 	gauge = Control.new()
 	gauge.position = Vector2(20, 150)
-	gauge.size = Vector2(150, 190)
+	gauge.size = Vector2(250, 250)
+	gauge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	gauge.draw.connect(_draw_gauge)
 	ui.add_child(gauge)
 
+	big = UiKit.label(ui, "", 64, ACCENT)
+	big.set_anchors_preset(Control.PRESET_CENTER)
+	big.position = Vector2(-500, -60)
+	big.custom_minimum_size = Vector2(1000, 0)
+	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
 	toast = UiKit.label(ui, "", 30, RED)
 	toast.set_anchors_preset(Control.PRESET_CENTER)
-	toast.position = Vector2(-400, -120)
+	toast.position = Vector2(-400, -150)
 	toast.custom_minimum_size = Vector2(800, 0)
 	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	toast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -239,12 +243,8 @@ func _build_ui() -> void:
 
 	_build_menu()
 	_build_result()
-	_build_unlock()
-	replay_bar = HBoxContainer.new()
-	replay_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	replay_bar.position = Vector2(-140, -100)
-	ui.add_child(replay_bar)
-	UiKit.ghost(replay_bar, "리플레이 닫기", _end_replay, Vector2(220, 56))
+	_build_freeze()
+	_build_replay_bar()
 
 
 func _build_menu() -> void:
@@ -252,57 +252,83 @@ func _build_menu() -> void:
 	menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	menu_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(menu_panel)
-	# 왼쪽 그라데이션 띠
 	var shade := ColorRect.new()
-	shade.color = Color(0.02, 0.03, 0.05, 0.55)
+	shade.color = Color(0.06, 0.07, 0.08, 0.78)
 	shade.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	shade.custom_minimum_size = Vector2(600, 0)
-	shade.size = Vector2(600, 720)
+	shade.custom_minimum_size = Vector2(930, 0)
+	shade.size = Vector2(930, 720)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	menu_panel.add_child(shade)
+	var stripe := ColorRect.new()   # safety-yellow edge
+	stripe.color = Color(1.0, 0.77, 0.0)
+	stripe.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	stripe.position.x = 930
+	stripe.custom_minimum_size = Vector2(6, 0)
+	stripe.size = Vector2(6, 720)
+	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_panel.add_child(stripe)
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_LEFT_WIDE)
 	margin.add_theme_constant_override("margin_left", 40)
-	margin.add_theme_constant_override("margin_top", 26)
-	margin.add_theme_constant_override("margin_bottom", 20)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 18)
 	menu_panel.add_child(margin)
-	var mv := UiKit.vbox(margin, 8)
-	var kicker := UiKit.label(mv, "지게차운전기능사 실기", 19, ACCENT)
-	var title := UiKit.label(mv, "지게차 실기 3D", 54)
-	UiKit.para(mv, "실제 코스 순서대로 운전하고, 실격·감점 기준으로 채점받는 연습장", 20, UiKit.DIM, 540)
-	UiKit.spacer(mv, 4)
-	stats_label = UiKit.label(mv, "", 19, Color(1, 1, 1, 0.8))
-	UiKit.spacer(mv, 4)
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 12)
-	mv.add_child(grid)
-	var bs := Vector2(250, 58)
-	UiKit.button(grid, "연습 코스", _start_practice, ACCENT, bs)
-	exam_btn = UiKit.button(grid, "모의시험 4분", _start_exam, Color(0.95, 0.42, 0.2), bs)
-	UiKit.button(grid, "단계 드릴", func(): _open("drills"), UiKit.BLUE, bs)
-	UiKit.button(grid, "학습 노트", func(): _open("learn"), Color(0.55, 0.85, 0.6), bs)
-	UiKit.ghost(grid, "기록", func(): _open("records"), bs)
-	UiKit.ghost(grid, "설정", func(): _open("settings"), bs)
-	UiKit.spacer(mv, 2)
-	var tow := UiKit.button(mv, "견인 기능시험 3D  ›", _open_towing, Color(0.36, 0.62, 0.95), Vector2(512, 54), 21)
-	tow.tooltip_text = "소형견인 · 구난 · 대형견인 장내기능시험"
-	tow.visible = not OS.has_feature("web")   # 토스 미니앱(웹)은 지게차만
-	UiKit.spacer(mv, 2)
-	var row2 := UiKit.hbox(mv, 10)
-	unlock_btn = UiKit.button(row2, "전체 해제", _buy, Color(0.45, 0.85, 0.5), Vector2(200, 50), 20)
-	restore_btn = UiKit.ghost(row2, "구매 복원", func(): iap.restore(), Vector2(140, 50), 19)
+	var mv := UiKit.vbox(margin, 10)
+	var head := UiKit.hbox(mv, 14)
+	UiKit.label(head, Lang.t("app.name"), 44)
+	var sub := UiKit.label(head, Lang.t("app.tagline"), 19, UiKit.DIM, false)
+	sub.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	stats_label = UiKit.label(mv, "", 18, Color(1, 1, 1, 0.72), false)
+	var cards := UiKit.hbox(mv, 18)
+	# forklift card
+	var fc := _card(cards, Lang.t("home.fl.title"), Lang.t("home.fl.meta"), Lang.t("home.fl.note"), Color(1.0, 0.77, 0.0))
+	var fg := GridContainer.new()
+	fg.columns = 2
+	fg.add_theme_constant_override("h_separation", 10)
+	fg.add_theme_constant_override("v_separation", 10)
+	fc.add_child(fg)
+	var bs := Vector2(198, 54)
+	UiKit.button(fg, Lang.t("home.exam_day"), _start_exam, Color(1.0, 0.77, 0.0), bs, 20)
+	UiKit.button(fg, Lang.t("home.practice"), _start_practice, Color(0.36, 0.62, 0.95), bs, 20)
+	UiKit.ghost(fg, Lang.t("home.drills"), func(): _open("drills"), bs, 20)
+	UiKit.ghost(fg, Lang.t("home.rulebook"), func(): _open("rules"), bs, 20)
+	# towing card
+	var tc := _card(cards, Lang.t("home.tow.title"), Lang.t("home.tow.meta"), Lang.t("home.tow.note"), Color(0.45, 0.75, 1.0))
+	UiKit.spacer(tc, 4)
+	var tb := UiKit.button(tc, Lang.t("home.tow.open"), _open_towing, Color(0.45, 0.75, 1.0), Vector2(386, 54), 20)
+	tb.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	tc.get_parent().get_parent().visible = not OS.has_feature("web")   # the Toss mini-app ships the forklift exam only
+	var row := UiKit.hbox(mv, 10)
+	UiKit.ghost(row, Lang.t("home.records"), func(): _open("records"), Vector2(150, 48), 19)
+	UiKit.ghost(row, Lang.t("home.settings"), func(): _open("settings"), Vector2(150, 48), 19)
+	UiKit.ghost(row, "한국어 / English", _toggle_lang, Vector2(200, 48), 19)
 	var link := LinkButton.new()
-	link.text = "지원 · 개인정보 처리방침"
+	link.text = Lang.t("home.support")
 	link.add_theme_font_size_override("font_size", 16)
 	link.add_theme_color_override("font_color", Color(0.75, 0.88, 1.0))
+	link.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	link.pressed.connect(func(): OS.shell_open(SUPPORT_URL))
-	link.visible = not OS.has_feature("toss")   # 토스 미니앱은 바깥 링크 금지
-	mv.add_child(link)
-	UiKit.para(mv, "실제 장비와 조작감은 다릅니다. 코스 순서와 실격·감점 기준을 몸에 익히는 용도예요.", 15, Color(1, 1, 1, 0.5), 520)
-	kicker.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	link.visible = not OS.has_feature("toss")
+	row.add_child(link)
+	UiKit.para(mv, Lang.t("home.disclaimer"), 15, Color(1, 1, 1, 0.5), 850)
+
+
+func _card(parent: Node, title: String, meta: String, note: String, col: Color) -> VBoxContainer:
+	var p := UiKit.panel(parent, Color(1, 1, 1, 0.07), 16, 20)
+	p.custom_minimum_size = Vector2(426, 0)
+	var sb: StyleBoxFlat = p.get_theme_stylebox("panel")
+	sb.border_width_top = 4
+	sb.border_color = col
+	var v := UiKit.vbox(p, 8)
+	UiKit.para(v, title, 26, INK, 386)
+	UiKit.label(v, meta, 18, col, false)
+	UiKit.para(v, note, 16, UiKit.DIM, 386)
+	return v
+
+
+func _toggle_lang() -> void:
+	Lang.set_code("en" if Lang.current() == "ko" else "ko")
+	get_tree().reload_current_scene()
 
 
 func _build_result() -> void:
@@ -310,49 +336,71 @@ func _build_result() -> void:
 	result_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(result_panel)
 	var shade := ColorRect.new()
-	shade.color = Color(0.02, 0.03, 0.05, 0.55)
+	shade.color = Color(0.02, 0.03, 0.05, 0.72)
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	result_panel.add_child(shade)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	result_panel.add_child(center)
-	var rp := UiKit.panel(center, UiKit.PANEL, 20, 24)
-	var row := UiKit.hbox(rp, 26)
-	result_body = UiKit.vbox(row, 8)
-	result_body.custom_minimum_size = Vector2(640, 0)
+	var rp := UiKit.panel(center, Color(0.93, 0.92, 0.88, 0.97), 6, 20)
+	var row := UiKit.hbox(rp, 22)
+	result_body = UiKit.vbox(row, 4)
+	result_body.custom_minimum_size = Vector2(780, 0)
 	result_course = CourseView.new()
-	result_course.setup(course, 18.0)
+	result_course.setup(course, 15.0)
 	result_course.show_dims = false
 	result_course.show_routes = false
+	result_course.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_child(result_course)
 
 
-func _build_unlock() -> void:
-	unlock_panel = CenterContainer.new()
-	unlock_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	ui.add_child(unlock_panel)
-	var up := UiKit.panel(unlock_panel)
-	var uv := UiKit.vbox(up, 16)
-	var ut := UiKit.label(uv, "전체 해제", 36, ACCENT)
-	ut.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	unlock_text = UiKit.para(uv, "", 23, INK, 720)
-	unlock_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var ur := UiKit.hbox(uv, 16, true)
-	UiKit.button(ur, "해제하기", _buy, Color(0.45, 0.85, 0.5))
-	UiKit.ghost(ur, "구매 복원", func(): iap.restore())
-	UiKit.ghost(ur, "닫기", _show_menu)
-	unlock_panel.visible = false
+func _build_freeze() -> void:
+	freeze_panel = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.06, 0.07, 0.92)
+	sb.border_width_left = 8
+	sb.border_color = RED
+	sb.set_content_margin_all(18)
+	freeze_panel.add_theme_stylebox_override("panel", sb)
+	freeze_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	freeze_panel.position = Vector2(-560, -250)
+	freeze_panel.custom_minimum_size = Vector2(1120, 0)
+	ui.add_child(freeze_panel)
+	freeze_body = UiKit.vbox(freeze_panel, 6)
+	freeze_panel.visible = false
 
 
-# ---------- 서브 화면 ----------
+func _build_replay_bar() -> void:
+	replay_bar = PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.05, 0.06, 0.08, 0.8)
+	sb.set_corner_radius_all(12)
+	sb.set_content_margin_all(12)
+	replay_bar.add_theme_stylebox_override("panel", sb)
+	replay_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	replay_bar.position = Vector2(-420, -96)
+	replay_bar.custom_minimum_size = Vector2(840, 0)
+	ui.add_child(replay_bar)
+	var h := UiKit.hbox(replay_bar, 14)
+	replay_slider = HSlider.new()
+	replay_slider.custom_minimum_size = Vector2(560, 40)
+	replay_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	replay_slider.value_changed.connect(func(v):
+		if not _slider_lock:
+			replay_i = v)
+	h.add_child(replay_slider)
+	UiKit.ghost(h, Lang.t("replay.close"), _end_replay, Vector2(220, 52))
+
+
+# ---------- sub screens ----------
 func _open(name: String) -> void:
 	_close_screens()
-	var s := UiKit.screen(ui, {"drills": "단계 드릴", "learn": "학습 노트", "records": "기록", "settings": "설정"}[name], _close_screens)
+	var s := UiKit.screen(ui, Lang.t("screen." + name), _close_screens)
 	screens[name] = s.root
 	menu_panel.visible = false
 	match name:
 		"drills": _fill_drills(s.body)
-		"learn": _fill_learn(s)
+		"rules": _fill_rules(s)
 		"records": _fill_records(s.body)
 		"settings": _fill_settings(s.body)
 	sfx.play("click")
@@ -366,7 +414,7 @@ func _close_screens() -> void:
 
 
 func _fill_drills(body: VBoxContainer) -> void:
-	UiKit.para(body, "코스를 구간별로 잘라 반복합니다. 구간 끝에 닿으면 바로 결과가 나와요.", 19, UiKit.DIM, 1200)
+	UiKit.para(body, Lang.t("drills.intro"), 19, UiKit.DIM, 1300)
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 14)
@@ -374,79 +422,73 @@ func _fill_drills(body: VBoxContainer) -> void:
 	body.add_child(grid)
 	for i in drills.size():
 		var d: Dictionary = drills[i]
-		var locked: bool = not d.free and not iap.unlocked
 		var p := UiKit.panel(grid, Color(1, 1, 1, 0.06), 16, 18)
 		p.custom_minimum_size = Vector2(470, 0)
 		var v := UiKit.vbox(p, 6)
 		var head := UiKit.hbox(v, 10)
 		UiKit.label(head, "%d" % (i + 1), 30, ACCENT)
-		var t := UiKit.label(head, d.title, 26)
+		var t := UiKit.label(head, Lang.t("drill.%s" % d.id), 26)
 		t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		if locked:
-			UiKit.chip(head, "해제 필요", Color(1, 1, 1, 0.6), 14)
-		UiKit.para(v, d.desc, 18, INK, 430)
+		UiKit.para(v, Lang.t("drill.%s.d" % d.id), 18, INK, 430)
 		var rec: Dictionary = store.data.drills.get(d.id, {})
 		var done := int(rec.get("done", 0))
-		var info := "아직 안 해봤어요" if done == 0 else "%d회 · 무실격 %d회" % [done, int(rec.get("clean", 0))]
+		var info := Lang.t("drills.never") if done == 0 else Lang.t("drills.count", [done, int(rec.get("clean", 0))])
 		if float(rec.get("best_time", -1.0)) >= 0:
-			info += " · 최고 %s" % _clock(float(rec.best_time))
+			info += Lang.t("drills.best", [_clock(float(rec.best_time))])
 		UiKit.label(v, info, 16, UiKit.DIM, false)
-		var sb := UiKit.button(v, "시작", _start_drill.bind(d), ACCENT if not locked else Color(1, 1, 1, 0.14), Vector2(200, 50), 20)
+		var sb := UiKit.button(v, Lang.t("ui.start"), _start_drill.bind(d), ACCENT, Vector2(200, 50), 20)
 		sb.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 
 
-func _fill_learn(s: Dictionary) -> void:
+## Rulebook: official disqualification rows with source, the estimated deductions, the course drawing.
+func _fill_rules(s: Dictionary) -> void:
 	var body: VBoxContainer = s.body
 	var tabs := UiKit.hbox(s.head, 8)
 	var pages := {}
-	var names := ["시험 개요", "코스 순서", "실격 사유", "감점 항목", "코스 도면", "요령"]
-	var first: String = names[int(_args.get("tab", "0"))]
+	var names := ["dq", "ded", "plan"]
+	var first: String = names[clampi(int(_args.get("tab", "0")), 0, 2)]
 	for n in names:
-		var v := UiKit.vbox(body, 10)
+		var v := UiKit.vbox(body, 8)
 		v.visible = n == first
 		pages[n] = v
-		var b := UiKit.ghost(tabs, n, func():
+		UiKit.ghost(tabs, Lang.t("rules.tab." + n), func():
 			for k in pages:
 				pages[k].visible = k == n
-			s.scroll.scroll_vertical = 0, Vector2(130, 46), 18)
-	# 개요
-	for item in Learn.OVERVIEW:
-		var p := UiKit.panel(pages["시험 개요"], Color(1, 1, 1, 0.06), 14, 16)
-		var h := UiKit.hbox(p, 16)
-		var k := UiKit.label(h, item[0], 21, ACCENT, false)
-		k.custom_minimum_size = Vector2(120, 0)
-		UiKit.para(h, item[1], 20, INK, 1180)
-	# 순서
-	for item in Learn.ORDER:
-		var p := UiKit.panel(pages["코스 순서"], Color(1, 1, 1, 0.06), 14, 16)
-		var v := UiKit.vbox(p, 4)
-		UiKit.label(v, item[0], 23, ACCENT, false)
-		UiKit.para(v, item[1], 20, INK, 1300)
-	# 실격
-	UiKit.para(pages["실격 사유"], "하나라도 해당하면 그 자리에서 실격(불합격)입니다. 이 앱의 모의시험도 같은 기준으로 끝납니다.", 19, UiKit.DIM, 1300)
-	for item in Learn.FAULTS:
-		var h := UiKit.hbox(pages["실격 사유"], 12)
-		UiKit.chip(h, item[1], RED, 15)
-		var l := UiKit.para(h, item[0], 20, INK, 1150)
+			s.scroll.scroll_vertical = 0, Vector2(170, 46), 18)
+	# official rows
+	var src := UiKit.panel(pages.dq, Color(1.0, 0.77, 0.0, 0.12), 10, 12)
+	UiKit.para(src, Lang.t("rules.source"), 17, INK, 1400)
+	for r in ExamRules.ROWS:
+		var p := UiKit.panel(pages.dq, Color(1, 1, 1, 0.05), 10, 10)
+		var h := UiKit.hbox(p, 14)
+		var n := UiKit.label(h, "(%d)" % r.n, 20, ACCENT, false)
+		n.custom_minimum_size = Vector2(54, 0)
+		var t := UiKit.para(h, Lang.t("rule." + r.id), 19, INK, 860)
+		t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var chip := UiKit.chip(h, Lang.t("rules.checked") if r.checked else Lang.t("rules.not_checked"), GREEN if r.checked else UiKit.DIM, 15)
+		chip.custom_minimum_size = Vector2(190, 0)
+		chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if r.checked:
+			var b := UiKit.button(h, Lang.t("rules.drill"), _start_rule.bind(r.id), Color(0.36, 0.62, 0.95), Vector2(170, 46), 18)
+			b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# estimated deductions
+	UiKit.para(pages.ded, Lang.t("rules.ded_intro"), 18, UiKit.DIM, 1400)
+	for code in ExamRules.DEDUCTIONS:
+		var h := UiKit.hbox(pages.ded, 12)
+		UiKit.chip(h, "-%d" % ExamRules.DEDUCTIONS[code], ACCENT, 15)
+		var l := UiKit.para(h, Lang.t("d." + code) + "  ·  " + Lang.t("part." + ExamRules.DEDUCTION_PART[code]), 19, INK, 1200)
 		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# 감점
-	UiKit.para(pages["감점 항목"], "실격은 아니지만 점수가 깎이는 항목. 상차 작업 45점, 하차 작업 55점에서 빼고 60점 이상이면 합격입니다.", 19, UiKit.DIM, 1300)
-	for item in Learn.DEDUCTIONS:
-		var h := UiKit.hbox(pages["감점 항목"], 12)
-		UiKit.chip(h, "-%d" % item[1], ACCENT, 15)
-		var l := UiKit.para(h, item[0], 20, INK, 1150)
-		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# 도면
+	# drawing and order
+	var row := UiKit.hbox(pages.plan, 20)
 	var cv := CourseView.new()
-	cv.setup(course, 30.0)
-	cv.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	pages["코스 도면"].add_child(cv)
-	UiKit.para(pages["코스 도면"], "파란 선이 전진 동선, 주황 선이 후진 동선입니다. 흰 선은 출발·도착선과 후진선, 노란 선은 밟으면 실격인 코스 경계선.", 18, UiKit.DIM, 1300)
-	# 요령
-	for i in Learn.TIPS.size():
-		var h := UiKit.hbox(pages["요령"], 12)
-		UiKit.label(h, "%d" % (i + 1), 24, ACCENT, false)
-		var l := UiKit.para(h, Learn.TIPS[i], 20, INK, 1200)
+	cv.setup(course, 21.0)
+	cv.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(cv)
+	var ov := UiKit.vbox(row, 8)
+	for i in 8:
+		var h := UiKit.hbox(ov, 10)
+		UiKit.label(h, "%d" % (i + 1), 22, ACCENT, false)
+		var l := UiKit.para(h, Lang.t("order.%d" % (i + 1)), 18, INK, 560)
 		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
 
@@ -455,36 +497,38 @@ func _fill_records(body: VBoxContainer) -> void:
 	var runs := int(store.data.runs)
 	var passes := int(store.data.passes)
 	var row := UiKit.hbox(body, 14)
-	_stat(row, "모의시험", "%d회" % runs)
-	_stat(row, "합격", "%d회" % passes)
-	_stat(row, "합격률", ("%d%%" % int(100.0 * passes / runs)) if runs > 0 else "-")
-	_stat(row, "최고 점수", ("%d점" % int(store.data.best)) if int(store.data.best) >= 0 else "-")
+	_stat(row, Lang.t("rec.exams"), str(runs))
+	_stat(row, Lang.t("rec.passes"), str(passes))
+	_stat(row, Lang.t("rec.rate"), ("%d%%" % int(100.0 * passes / runs)) if runs > 0 else "-")
+	_stat(row, Lang.t("rec.best"), str(int(store.data.best)) if int(store.data.best) >= 0 else "-")
 	UiKit.spacer(body, 6)
 	if h.is_empty():
-		UiKit.para(body, "아직 기록이 없어요. 모의시험이나 연습 코스를 끝까지 돌면 여기에 쌓입니다.", 20, UiKit.DIM, 1200)
+		UiKit.para(body, Lang.t("rec.empty"), 20, UiKit.DIM, 1200)
 		return
 	var head := UiKit.hbox(body, 0)
-	for col in [["날짜", 230], ["모드", 110], ["결과", 110], ["점수", 100], ["상차", 90], ["하차", 90], ["시간", 100], ["비고", 400]]:
-		var l := UiKit.label(head, col[0], 17, UiKit.DIM, false)
+	for col in [["rec.date", 230], ["rec.mode", 230], ["rec.result", 120], ["rec.score", 100], ["rec.load", 90], ["rec.unload", 90], ["rec.time", 100], ["rec.note", 400]]:
+		var l := UiKit.label(head, Lang.t(col[0]), 17, UiKit.DIM, false)
 		l.custom_minimum_size = Vector2(col[1], 0)
 	UiKit.rule(body)
 	for e in h:
 		var r := UiKit.hbox(body, 0)
 		var passed := bool(e.get("pass", false))
+		var m := str(e.get("mode", ""))
+		var mname := Lang.t("mode." + m) if Lang.has("mode." + m) else "-"
+		if e.has("title"):
+			var tk := "drill." + str(e.title)
+			var rk := "rule." + str(e.title)
+			mname += " · " + (Lang.t(tk) if Lang.has(tk) else ("(%s)" % str(e.title).substr(1) if Lang.has(rk) else str(e.title)))
 		var cells := [
 			[str(e.get("ts", "")), 230, INK],
-			[{"exam": "모의시험", "practice": "연습", "drill": "드릴"}.get(e.get("mode", ""), "-") + ("" if e.get("mode", "") != "drill" else " · " + str(e.get("title", ""))), 110 if e.get("mode", "") != "drill" else 330, INK],
-			["합격" if passed else "불합격", 110, GREEN if passed else RED],
+			[mname, 230, INK],
+			[Lang.t("res.pass") if passed else Lang.t("res.fail"), 120, GREEN if passed else RED],
 			["%d" % int(e.get("score", 0)), 100, INK],
 			["%d/45" % int(e.get("load", 0)), 90, INK],
 			["%d/55" % int(e.get("unload", 0)), 90, INK],
 			[_clock(float(e.get("time", 0))), 100, INK],
 			[str(e.get("note", "")), 400, UiKit.DIM],
 		]
-		if e.get("mode", "") == "drill":
-			cells.remove_at(5)
-			cells.remove_at(4)
-			cells.remove_at(3)
 		for c in cells:
 			var l := UiKit.label(r, c[0], 18, c[2], false)
 			l.custom_minimum_size = Vector2(c[1], 0)
@@ -500,15 +544,25 @@ func _stat(parent: Node, k: String, v: String) -> void:
 
 
 func _fill_settings(body: VBoxContainer) -> void:
-	_setting_toggle(body, "효과음", "엔진·후진 경고음·유압음·경음기", "sound")
-	_setting_toggle(body, "진동", "실격·감점·출발 신호 때 짧게 진동 (휴대폰)", "haptics")
-	# 핸들 감도
+	var pl := UiKit.panel(body, Color(1, 1, 1, 0.06), 14, 16)
+	var hl := UiKit.hbox(pl, 16)
+	var vl := UiKit.vbox(hl, 2)
+	vl.custom_minimum_size = Vector2(520, 0)
+	UiKit.label(vl, Lang.t("set.lang"), 22, INK, false)
+	UiKit.label(vl, Lang.t("set.lang.d"), 16, UiKit.DIM, false)
+	for c in [["ko", "한국어"], ["en", "English"]]:
+		var b := UiKit.button(hl, c[1], func():
+			Lang.set_code(c[0])
+			get_tree().reload_current_scene(), ACCENT if Lang.current() == c[0] else Color(1, 1, 1, 0.14), Vector2(150, 46), 19)
+		b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_setting_toggle(body, Lang.t("set.sound"), Lang.t("set.sound.d"), "sound")
+	_setting_toggle(body, Lang.t("set.haptics"), Lang.t("set.haptics.d"), "haptics")
 	var p := UiKit.panel(body, Color(1, 1, 1, 0.06), 14, 16)
 	var h := UiKit.hbox(p, 16)
 	var v := UiKit.vbox(h, 2)
 	v.custom_minimum_size = Vector2(520, 0)
-	UiKit.label(v, "핸들 감도", 22, INK, false)
-	UiKit.label(v, "낮으면 핸들을 많이 돌려야 하고, 높으면 조금만 돌려도 크게 꺾입니다.", 16, UiKit.DIM, false)
+	UiKit.label(v, Lang.t("set.steer"), 22, INK, false)
+	UiKit.label(v, Lang.t("set.steer.d"), 16, UiKit.DIM, false)
 	var sl := HSlider.new()
 	sl.min_value = 0.6
 	sl.max_value = 1.4
@@ -524,16 +578,15 @@ func _fill_settings(body: VBoxContainer) -> void:
 		val.text = "%.1f" % x
 		store.save()
 		_apply_settings())
-	# 기본 시점
 	var p2 := UiKit.panel(body, Color(1, 1, 1, 0.06), 14, 16)
 	var h2 := UiKit.hbox(p2, 16)
 	var v2 := UiKit.vbox(h2, 2)
 	v2.custom_minimum_size = Vector2(520, 0)
-	UiKit.label(v2, "시작 시점", 22, INK, false)
-	UiKit.label(v2, "주행을 시작할 때의 카메라. 주행 중에도 버튼으로 바꿀 수 있어요.", 16, UiKit.DIM, false)
+	UiKit.label(v2, Lang.t("set.cam"), 22, INK, false)
+	UiKit.label(v2, Lang.t("set.cam.d"), 16, UiKit.DIM, false)
 	var ob := OptionButton.new()
-	for n in CAM_NAMES:
-		ob.add_item(n)
+	for i in 4:
+		ob.add_item(Lang.t("cam.%d" % i))
 	ob.selected = int(store.data.cam)
 	ob.add_theme_font_size_override("font_size", 20)
 	ob.custom_minimum_size = Vector2(200, 46)
@@ -543,7 +596,7 @@ func _fill_settings(body: VBoxContainer) -> void:
 		store.save())
 	h2.add_child(ob)
 	UiKit.spacer(body, 6)
-	UiKit.para(body, "키보드(데스크톱): W 가속 · S 브레이크 · A/D 핸들 · 1/2/3 전진·중립·후진 · R/F 리프트 · T/G 틸트 · B 안전벨트 · P 주차 브레이크 · C 시점 · V 뒤 보기 · H 경음기 · Enter 출발 신호", 16, UiKit.DIM, 1300)
+	UiKit.para(body, Lang.t("set.keys"), 16, UiKit.DIM, 1300)
 
 
 func _setting_toggle(body: VBoxContainer, title: String, desc: String, key: String) -> void:
@@ -556,7 +609,7 @@ func _setting_toggle(body: VBoxContainer, title: String, desc: String, key: Stri
 	var b := UiKit.button(h, "", func(): pass, ACCENT, Vector2(120, 46), 19)
 	var refresh := func():
 		var on := bool(store.data[key])
-		b.text = "켜짐" if on else "꺼짐"
+		b.text = Lang.t("ui.on") if on else Lang.t("ui.off")
 		b.modulate = Color(1, 1, 1, 1.0 if on else 0.45)
 	b.pressed.connect(func():
 		store.data[key] = not bool(store.data[key])
@@ -566,49 +619,23 @@ func _setting_toggle(body: VBoxContainer, title: String, desc: String, key: Stri
 	refresh.call()
 
 
-# ---------- 메뉴·시작 ----------
-func _refresh_lock() -> void:
-	if not unlock_btn:
-		return
-	var price := iap.price if iap.price != "" else ""
-	unlock_btn.visible = not iap.unlocked
-	restore_btn.visible = not iap.unlocked
-	unlock_btn.text = ("전체 해제 " + price).strip_edges()
-	exam_btn.text = "모의시험 4분" if iap.unlocked else "모의시험 (해제 필요)"
-	var best := int(store.data.best)
+# ---------- menu and start ----------
+func _refresh_stats() -> void:
 	var runs := int(store.data.runs)
-	stats_label.text = ("모의시험 최고 %d점 · %d회 중 합격 %d회" % [best, runs, int(store.data.passes)]) if runs > 0 else "첫 모의시험을 기다리고 있어요"
-	if iap.unlocked and unlock_panel.visible:
-		unlock_panel.visible = false
-		_toast("전체 해제됐어요. 고마워요!", GREEN)
-		_show_menu()
-
-
-func _buy() -> void:
-	iap.buy()
-
-
-func _show_unlock(why: String) -> void:
-	state = State.RESULT
-	controls.visible = false
-	controls.enabled = false
-	menu_panel.visible = false
-	result_panel.visible = false
-	unlock_panel.visible = true
-	var price := (" (" + iap.price + ")") if iap.price != "" else ""
-	unlock_text.text = why + "\n\n한 번 결제%s로 연습 코스 전체, 단계 드릴 6종, 4분 모의시험 채점, 실격 지점 리플레이, 견인 기능시험 3종 전체를 계속 쓸 수 있어요. 광고나 구독은 없어요." % price
+	stats_label.text = Lang.t("home.stats", [int(store.data.best), runs, int(store.data.passes)]) if runs > 0 else Lang.t("home.stats_none")
 
 
 func _show_menu() -> void:
 	state = State.MENU
 	_close_screens()
-	unlock_panel.visible = false
-	_refresh_lock()
+	_refresh_stats()
 	menu_panel.visible = true
 	result_panel.visible = false
+	freeze_panel.visible = false
 	replay_bar.visible = false
 	controls.visible = false
 	controls.enabled = false
+	big.text = ""
 	sim.reset()
 	sim.lift = 0.0
 	frames.clear()
@@ -621,59 +648,67 @@ func _start_practice() -> void:
 
 
 func _start_exam() -> void:
-	if not iap.unlocked:
-		_show_unlock("모의시험은 전체 해제 후 쓸 수 있어요.")
-		return
 	_start(Mode.EXAM)
 
 
 func _start_drill(d: Dictionary) -> void:
-	if not d.free and not iap.unlocked:
-		_show_unlock("이 드릴은 전체 해제 후 쓸 수 있어요. 1·2번 드릴은 무료예요.")
-		return
 	drill = d
 	_start(Mode.DRILL)
 
 
+func _start_rule(rule_id: String) -> void:
+	drill = Drills.rule_drill(course, rule_id)
+	if drill.is_empty():
+		return
+	_start(Mode.RULE)
+
+
 func _start(m: Mode) -> void:
 	_close_screens()
-	unlock_panel.visible = false
 	mode = m
 	exam = m == Mode.EXAM
 	sim.exam = exam
-	if m == Mode.DRILL:
+	if m == Mode.DRILL or m == Mode.RULE:
 		sim.start_drill(drill)
 	else:
 		sim.reset()
 	controls.reset()
 	controls.seatbelt = sim.seatbelt
 	controls.park_brake = sim.park_brake
+	controls.gear = sim.gear
 	frames.clear()
 	_faults_seen = 0
 	_deduct_seen = 0
 	toast.text = ""
+	big.text = ""
 	state = State.RUN
 	menu_panel.visible = false
 	result_panel.visible = false
+	freeze_panel.visible = false
 	replay_bar.visible = false
 	controls.visible = true
 	controls.enabled = true
-	controls.set_button("signal", "시작 신호" if exam else "")
-	if not exam:
+	controls.set_button("signal", "")
+	signal_wait = SIGNAL_WAIT if exam else 0.0
+	if m == Mode.PRACTICE:
 		sim.give_signal()
 	cam_mode = int(store.data.cam) as Cam
 	look_back = false
 	_sync_controls_buttons()
 	if m == Mode.DRILL:
-		_toast(drill.tip, Color(0.85, 0.95, 1.0), 6.0)
+		_toast(Lang.t("drill.%s.tip" % drill.id), Color(0.85, 0.95, 1.0), 6.0)
+	elif m == Mode.RULE:
+		_toast(Lang.t("rdrill.%s" % drill.rule), Color(0.85, 0.95, 1.0), 7.0)
+	elif exam:
+		_toast(Lang.t("exam.ready"), Color(0.85, 0.95, 1.0), SIGNAL_WAIT)
 	sfx.play("click")
 
 
 func _sync_controls_buttons() -> void:
-	controls.set_button("seatbelt", "안전벨트 " + ("O" if controls.seatbelt else "X"), controls.seatbelt)
-	controls.set_button("park", "주차브레이크 " + ("ON" if controls.park_brake else "OFF"), controls.park_brake)
-	controls.set_button("camera", CAM_NAMES[cam_mode])
-	controls.set_button("look", "앞 보기" if look_back else "뒤 보기", look_back)
+	controls.set_button("seatbelt", Lang.t("ctl.seatbelt") + (" O" if controls.seatbelt else " X"), controls.seatbelt)
+	controls.set_button("park", Lang.t("ctl.park") + (" ON" if controls.park_brake else " OFF"), controls.park_brake)
+	controls.set_button("camera", Lang.t("cam.%d" % cam_mode))
+	controls.set_button("look", Lang.t("ctl.look_fwd") if look_back else Lang.t("ctl.look_back"), look_back)
 
 
 func _on_action(name: String) -> void:
@@ -690,13 +725,6 @@ func _on_action(name: String) -> void:
 			sim.horn_count += 1
 		"seatbelt", "park":
 			sfx.play("click")
-		"signal":
-			if state == State.RUN and exam and not sim.signal_given:
-				sim.give_signal()
-				sfx.play("whistle")
-				sfx.buzz(80)
-				controls.set_button("signal", "")
-				_toast("삐익! 1분 안에 출발선을 지나세요", GREEN)
 	_sync_controls_buttons()
 
 
@@ -706,10 +734,18 @@ func _toast(t: String, c := RED, secs := 3.0) -> void:
 	toast_t = secs
 
 
-# ---------- 루프 ----------
+# ---------- loop ----------
 func _physics_process(dt: float) -> void:
 	if state != State.RUN:
 		return
+	# exam day: the examiner's whistle after a short wait
+	if exam and not sim.signal_given:
+		signal_wait -= dt
+		if signal_wait <= 0.0:
+			sim.give_signal()
+			sfx.play("whistle")
+			sfx.buzz(80)
+			_toast(Lang.t("exam.whistle"), GREEN, 2.5)
 	controls.poll_keys(dt)
 	sim.seatbelt = controls.seatbelt
 	sim.park_brake = controls.park_brake
@@ -723,28 +759,36 @@ func _physics_process(dt: float) -> void:
 		tilt = controls.tilt,
 	})
 	controls.show_steer(sim.steer)
-	frames.append([sim.pos, sim.heading, sim.steer, sim.lift, sim.tilt, sim.pallet_pos, sim.pallet_heading, sim.pallet_base, sim.pallet_fallen, sim.t_exam])
+	_record()
+	var graded := exam or mode == Mode.RULE
 	while _faults_seen < sim.faults.size():
 		var f: Dictionary = sim.faults[_faults_seen]
 		_faults_seen += 1
-		_toast(("실격: " if exam else "실격 사유: ") + f.msg)
 		sfx.play("buzzer")
 		sfx.buzz(220)
+		if graded:
+			_freeze(f, true)
+			return
+		_toast(Lang.t("res.dq_note") + f.msg)
 	while _deduct_seen < sim.deductions.size():
 		var d: Dictionary = sim.deductions[_deduct_seen]
 		_deduct_seen += 1
-		_toast("감점 -%d: %s" % [d.pts, d.msg], ACCENT)
 		sfx.play("thud")
 		sfx.buzz(60)
+		if exam:
+			_freeze(d, false)
+			return
+		_toast(Lang.t("res.ded_note", [d.pts]) + d.msg, ACCENT)
 	if sim.step != prev_step and not sim.done:
 		sfx.play("chime")
 		sfx.buzz(40)
 	sfx.update(sim, true, dt, controls.lift, controls.tilt, controls.throttle)
 	if sim.done:
 		_show_result()
-	elif mode != Mode.DRILL and not iap.unlocked and sim.step >= Sim.Step.UNLOADED:
-		sfx.play("chime")
-		_show_unlock("잘했어요! 무료 연습은 하역까지예요. 후진선 터치부터 주차까지 남은 코스는 전체 해제 후 이어서 연습할 수 있어요.")
+
+
+func _record() -> void:
+	frames.append([sim.pos, sim.heading, sim.steer, sim.lift, sim.tilt, sim.pallet_pos, sim.pallet_heading, sim.pallet_base, sim.pallet_fallen, sim.t_exam])
 
 
 func _process(dt: float) -> void:
@@ -757,13 +801,13 @@ func _process(dt: float) -> void:
 	_update_camera(dt)
 	_update_hud(dt)
 	minimap.queue_redraw()
+	overlay.queue_redraw()
 	if _shot_frames >= 0:
 		_shot_frames -= 1
 		if _shot_frames == 0:
 			_take_shot()
 
 
-## 3D 모델 위치. 들고 있는 팔레트는 마스트 틸트만큼 같이 기울인다.
 func _sync_models(dt: float) -> void:
 	world.sync(sim)
 	fork.sync(sim, dt)
@@ -784,10 +828,10 @@ func _update_marker(dt: float) -> void:
 	match sim.step:
 		Sim.Step.READY: p = World.v3(Vector2(0, course.start_line_y), 1.2)
 		Sim.Step.TO_LOAD, Sim.Step.RELOADED: p = World.v3(course.drum_pos, 2.0)
-		Sim.Step.LOADED: p = World.v3(course.unload_target, 1.2)
-		Sim.Step.UNLOADED: p = World.v3(Vector2(course.back_line_x, course.unload_target.y), 1.2)
-		Sim.Step.TOUCHED: p = World.v3(course.unload_target, 1.2)
+		Sim.Step.LOADED, Sim.Step.TOUCHED: p = World.v3(course.guide_pos, 1.2)
+		Sim.Step.UNLOADED: p = World.v3(Vector2(course.back_line_x, course.center.y), 1.2)
 		Sim.Step.RETURNED: p = World.v3(Vector2(0, course.start_line_y), 1.2)
+		Sim.Step.FINISHED: p = World.v3(Vector2(0, course.park_line_y), 1.2)
 		_: show = false
 	marker.visible = show
 	marker.position = p + Vector3(0, sin(t * 3.0) * 0.12, 0)
@@ -798,6 +842,15 @@ func _update_camera(dt: float) -> void:
 	var base := World.v3(sim.pos)
 	var k := 1.0 - exp(-dt * 6.0)
 	cam.projection = Camera3D.PROJECTION_PERSPECTIVE
+	if state == State.FREEZE and not freeze_item.is_empty():
+		var a := _m3(freeze_item.get("ma", Vector3.INF), sim.pos)
+		var b := _m3(freeze_item.get("mb", Vector3.INF), sim.pos)
+		var mid := (a + b) * 0.5
+		var side := World.v3(sim.right())
+		cam.global_position = mid + side * 4.2 - fwd * 3.0 + Vector3(0, 2.6, 0)
+		cam.look_at(mid, Vector3.UP)
+		cam.fov = 55.0
+		return
 	match cam_mode:
 		Cam.CAB:
 			var eye := fork.cab_eye.global_position
@@ -820,49 +873,78 @@ func _update_camera(dt: float) -> void:
 		Cam.TOP:
 			var c := course.bounds().get_center()
 			cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-			cam.size = course.bounds().size.y + 4.0
-			cam.global_position = World.v3(c, 30.0)
+			cam.size = course.bounds().size.y + 2.0
+			cam.global_position = World.v3(c, 40.0)
 			cam.rotation = Vector3(-PI / 2, 0, 0)
 	if state == State.MENU:
-		# 메뉴: 출발 위치의 지게차를 천천히 도는 카메라 (오른쪽 화면에 보이게 조금 비껴서)
 		_menu_angle += dt * 0.12
 		var c2 := base + Vector3(0, 1.1, 0)
 		var eye := c2 + Vector3(cos(_menu_angle) * 7.5, 2.4, sin(_menu_angle) * 7.5)
 		cam.global_position = eye
 		cam.look_at(c2, Vector3.UP)
 		cam.fov = 50.0
-		cam.h_offset = -2.2
+		cam.h_offset = 3.6
+
+
+## Measurement point (x, y, height) in sim space -> 3D.
+static func _m3(m, fallback: Vector2) -> Vector3:
+	if typeof(m) != TYPE_VECTOR3 or m == Vector3.INF:
+		return World.v3(fallback, 0.3)
+	return World.v3(Vector2(m.x, m.y), m.z)
+
+
+func _rule_n(rule_id: String) -> int:
+	for r in ExamRules.ROWS:
+		if r.id == rule_id:
+			return r.n
+	return 0
 
 
 func _update_hud(dt: float) -> void:
-	var playing := state == State.RUN or state == State.REPLAY
+	var playing := state == State.RUN or state == State.REPLAY or state == State.FREEZE
 	hud.visible = playing
 	step_label.visible = state == State.RUN
-	step_dots.visible = state == State.RUN and mode != Mode.DRILL
+	step_dots.visible = state == State.RUN and mode != Mode.DRILL and mode != Mode.RULE
 	gauge.visible = playing
-	minimap.visible = playing
-	cam.h_offset = 0.0 if state != State.MENU else cam.h_offset
+	minimap.visible = state == State.RUN or state == State.REPLAY
+	if state != State.MENU:
+		cam.h_offset = 0.0
 	if toast_t > 0:
 		toast_t -= dt
 		if toast_t <= 0:
 			toast.text = ""
+	big.visible = state == State.RUN
 	if not playing:
 		return
 	var t := sim.t_exam
+	big.text = ""
 	if state == State.REPLAY:
-		hud.text = "리플레이  %s" % _clock(t)
+		hud.text = Lang.t("hud.replay", [_clock(t)])
+	elif state == State.FREEZE:
+		hud.text = Lang.t("hud.freeze", [_clock(t)])
 	elif exam:
 		if not sim.signal_given:
-			hud.text = "모의시험 · 준비"
+			hud.text = Lang.t("hud.wait")
+			big.text = "%d" % int(ceil(signal_wait))
 		elif sim.step == Sim.Step.READY:
-			hud.text = "출발까지 %d초" % int(ceil(course.start_limit - sim.t_signal))
+			var left := course.start_limit - sim.t_signal
+			hud.text = Lang.t("hud.start_left", [int(ceil(left))])
+			big.text = "%d" % int(ceil(left))
+			big.add_theme_color_override("font_color", RED if left < 15.0 else ACCENT)
+		elif sim.step >= Sim.Step.FINISHED:
+			hud.text = Lang.t("hud.stopped", [_clock(t)])
 		else:
-			hud.text = "남은 시간 %s" % _clock(maxf(course.time_limit - t, 0.0))
+			hud.text = Lang.t("hud.left", [_clock_tenths(maxf(course.time_limit - t, 0.0))])
 	elif mode == Mode.DRILL:
-		hud.text = "드릴 · %s · %s" % [drill.title, _clock(sim.t_total)]
+		hud.text = Lang.t("hud.drill", [_clock(sim.t_total)])
+		step_label.text = Lang.t("drill.%s" % drill.id)
+	elif mode == Mode.RULE:
+		hud.text = Lang.t("hud.drill", [_clock(sim.t_total)])
+		step_label.text = "(%d) %s" % [_rule_n(drill.rule), Lang.t("rule." + drill.rule)]
 	else:
-		hud.text = "연습 · %s" % _clock(t)
-	step_label.text = sim.instruction()
+		hud.text = Lang.t("hud.practice", [_clock(t)])
+	if mode != Mode.DRILL and mode != Mode.RULE:
+		step_label.text = sim.instruction()
 	step_dots.queue_redraw()
 	gauge.queue_redraw()
 
@@ -880,49 +962,148 @@ func _draw_step_dots() -> void:
 		step_dots.draw_circle(Vector2(x0 + i * w + w * 0.5, 8), 5.0 if i != sim.step else 7.0, c)
 
 
+## Examiner panel: what the examiner looks at, in cm, against the limits.
 func _draw_gauge() -> void:
 	var f := gauge.get_theme_default_font()
 	var g := gauge
-	g.draw_rect(Rect2(Vector2.ZERO, g.size), Color(0.05, 0.06, 0.08, 0.55))
-	# 포크 높이 막대 (0~100cm, 20~30 초록 띠, 50 빨간 선)
-	var bx := 14.0
-	var by := 14.0
-	var bh := g.size.y - 28.0
-	g.draw_rect(Rect2(bx, by, 16, bh), Color(1, 1, 1, 0.12))
+	g.draw_rect(Rect2(Vector2.ZERO, g.size), Color(0.05, 0.06, 0.08, 0.62))
+	g.draw_rect(Rect2(0, 0, 4, g.size.y), Color(1.0, 0.77, 0.0))
+	g.draw_string(f, Vector2(16, 24), Lang.t("hud.examiner"), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, UiKit.DIM)
+	var bx := 18.0
+	var by := 36.0
+	var bh := g.size.y - 52.0
+	g.draw_rect(Rect2(bx, by, 14, bh), Color(1, 1, 1, 0.12))
 	var y_of := func(h: float) -> float: return by + bh - clampf(h, 0.0, 1.0) * bh
-	g.draw_rect(Rect2(bx, y_of.call(0.3), 16, y_of.call(0.2) - y_of.call(0.3)), Color(GREEN, 0.5))
-	g.draw_line(Vector2(bx - 3, y_of.call(0.5)), Vector2(bx + 19, y_of.call(0.5)), RED, 2.0)
+	g.draw_rect(Rect2(bx, y_of.call(0.3), 14, y_of.call(0.2) - y_of.call(0.3)), Color(GREEN, 0.5))
+	g.draw_line(Vector2(bx - 3, y_of.call(0.5)), Vector2(bx + 17, y_of.call(0.5)), RED, 2.0)
+	var travel := sim.front_in_travel() and sim.front_zone() == "travel"
 	var lc := INK
-	var z := sim.zone()
-	if z == "travel" and (sim.lift < 0.15 or sim.lift > 0.35):
+	if travel and (sim.lift < 0.15 or sim.lift > 0.35):
 		lc = ACCENT
-	if z == "travel" and sim.lift > 0.45:
+	if travel and sim.lift > 0.45:
 		lc = RED
 	var ly: float = y_of.call(sim.lift)
-	g.draw_rect(Rect2(bx - 2, ly - 3, 20, 6), lc)
-	g.draw_string(f, Vector2(40, 32), "포크 %d cm" % roundi(sim.lift * 100), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, lc)
-	g.draw_string(f, Vector2(40, 66), "틸트 %+.0f°" % sim.tilt, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, INK if not sim.carried or sim.tilt >= 1.0 else ACCENT)
-	g.draw_string(f, Vector2(40, 100), "%.1f km/h" % (absf(sim.speed) * 3.6), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, INK)
-	var g_names := {1: "전진", 0: "중립", -1: "후진"}
-	g.draw_string(f, Vector2(40, 134), g_names[sim.gear], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, ACCENT if sim.gear != 0 else UiKit.DIM)
-	g.draw_string(f, Vector2(40, 168), "뒤로 젖힘" if sim.tilt >= 1.0 else ("앞으로 숙임" if sim.tilt <= -1.0 else "수직"), HORIZONTAL_ALIGNMENT_LEFT, -1, 17, UiKit.DIM)
+	g.draw_rect(Rect2(bx - 2, ly - 3, 18, 6), lc)
+	var x := 46.0
+	var rows := [[Lang.t("hud.fork", [roundi(sim.lift * 100)]), lc]]
+	var wl := sim.wheel_line_cm()
+	rows.append([Lang.t("hud.line", [maxi(roundi(wl), 0)]), RED if wl < 10 else (ACCENT if wl < 25 else INK)])
+	var po := sim.pallet_offset_cm()
+	if po >= 0.0 and (sim.step == Sim.Step.LOADED or sim.step == Sim.Step.UNLOADED or sim.step == Sim.Step.TOUCHED):
+		rows.append([Lang.t("hud.pallet", [roundi(po)]), RED if po > 20 else (ACCENT if po > 12 else GREEN)])
+	rows.append([Lang.t("hud.tilt", [sim.tilt]), INK if not sim.carried or sim.tilt >= 1.0 else ACCENT])
+	rows.append(["%.1f km/h" % (absf(sim.speed) * 3.6), INK])
+	var gk: String = {1: "f", 0: "n", -1: "r"}[sim.gear]
+	rows.append([Lang.t("gear." + gk), ACCENT if sim.gear != 0 else UiKit.DIM])
+	rows.append([Lang.t("zone." + ("travel" if travel else sim.front_zone())), UiKit.DIM])
+	for i in rows.size():
+		g.draw_string(f, Vector2(x, 54 + i * 28), rows[i][0], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, rows[i][1])
+
+
+## Freeze-frame measurement line, drawn over the 3D view.
+func _draw_overlay() -> void:
+	if state != State.FREEZE or freeze_item.is_empty():
+		return
+	if int(replay_i) < freeze_frame - 1:
+		return   # scrubbed back: show the run, not the measurement
+	var a := _m3(freeze_item.get("ma", Vector3.INF), sim.pos)
+	var b := _m3(freeze_item.get("mb", Vector3.INF), sim.pos)
+	if cam.is_position_behind(a) or cam.is_position_behind(b):
+		return
+	var pa := cam.unproject_position(a)
+	var pb := cam.unproject_position(b)
+	var col := RED if freeze_is_fault else ACCENT
+	overlay.draw_line(pa, pb, Color(0, 0, 0, 0.6), 9.0)
+	overlay.draw_line(pa, pb, col, 5.0)
+	for p in [pa, pb]:
+		overlay.draw_circle(p, 9.0, col)
+		overlay.draw_circle(p, 4.0, Color.WHITE)
+	var m := ExamRules.measured(freeze_item)
+	if m != "":
+		var f := overlay.get_theme_default_font()
+		var mid := (pa + pb) * 0.5 + Vector2(18, -18)
+		overlay.draw_string_outline(f, mid, m, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, 8, Color(0, 0, 0, 0.8))
+		overlay.draw_string(f, mid, m, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color.WHITE)
 
 
 static func _clock(t: float) -> String:
 	return "%d:%02d" % [int(t) / 60, int(t) % 60]
 
 
-# ---------- 결과·리플레이 ----------
+static func _clock_tenths(t: float) -> String:
+	return "%d:%04.1f" % [int(t) / 60, fmod(t, 60.0)]
+
+
+# ---------- freeze frame ----------
+func _freeze(item: Dictionary, is_fault: bool) -> void:
+	state = State.FREEZE
+	freeze_item = item
+	freeze_is_fault = is_fault
+	freeze_frame = frames.size() - 1
+	controls.visible = false
+	controls.enabled = false
+	sfx.update(sim, false, 0.0, 0, 0, 0)
+	for c in freeze_body.get_children():
+		c.queue_free()
+	var sb: StyleBoxFlat = freeze_panel.get_theme_stylebox("panel")
+	sb.border_color = RED if is_fault else ACCENT
+	var head := UiKit.hbox(freeze_body, 14)
+	var kind := Lang.t("res.dq") if is_fault else Lang.t("res.ded", [item.pts])
+	UiKit.chip(head, kind, RED if is_fault else ACCENT, 20)
+	var t := UiKit.label(head, item.msg, 28, INK, false)
+	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var m := ExamRules.measured(item)
+	var line := (m + "   ·   ") if m != "" else ""
+	line += ExamRules.cite(item.code) if is_fault else Lang.t("res.estimate")
+	UiKit.label(freeze_body, line, 21, Color(1.0, 0.85, 0.5) if is_fault else UiKit.DIM, false)
+	var row := UiKit.hbox(freeze_body, 14)
+	var sl := UiKit.label(row, Lang.t("freeze.scrub"), 17, UiKit.DIM, false)
+	sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	freeze_slider = HSlider.new()
+	freeze_slider.custom_minimum_size = Vector2(560, 40)
+	freeze_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var from := maxi(0, frames.size() - 60 * 8)
+	freeze_slider.min_value = from
+	freeze_slider.max_value = maxi(frames.size() - 1, from + 1)
+	freeze_slider.step = 1
+	freeze_slider.value = frames.size() - 1
+	freeze_slider.value_changed.connect(func(v):
+		replay_i = v
+		_apply_frame(int(v)))
+	row.add_child(freeze_slider)
+	if is_fault:
+		UiKit.button(row, Lang.t("freeze.sheet"), _show_result, ACCENT, Vector2(220, 52), 20)
+	else:
+		UiKit.button(row, Lang.t("freeze.continue"), _unfreeze, GREEN, Vector2(200, 52), 20)
+	replay_i = frames.size() - 1
+	freeze_panel.visible = true
+	toast.text = ""
+
+
+func _unfreeze() -> void:
+	_apply_frame(freeze_frame)
+	freeze_panel.visible = false
+	freeze_item = {}
+	state = State.RUN
+	controls.visible = true
+	controls.enabled = true
+
+
+# ---------- result: score sheet ----------
 func _show_result() -> void:
+	if state == State.FREEZE:
+		_apply_frame(freeze_frame)
 	state = State.RESULT
+	freeze_panel.visible = false
 	sfx.update(sim, false, 0.0, 0, 0, 0)
 	var ts := Time.get_datetime_string_from_system(false, true).substr(0, 16).replace("T", " ")
 	var passed := sim.passed()
-	if mode == Mode.DRILL:
+	var is_drill := mode == Mode.DRILL or mode == Mode.RULE
+	if is_drill:
 		var clean := sim.faults.is_empty() and sim.deductions.is_empty()
 		store.drill_done(drill.id, sim.t_total, clean)
-		store.add_history({"ts": ts, "mode": "drill", "title": drill.title, "score": 0, "load": 0, "unload": 0, "pass": sim.faults.is_empty(), "time": sim.t_total,
-			"note": "무실격·무감점" if clean else ("감점 %d" % sim.deductions.size() if sim.faults.is_empty() else sim.faults[0].msg)})
+		store.add_history({"ts": ts, "mode": "drill", "title": drill.id, "score": 0, "load": 0, "unload": 0, "pass": sim.faults.is_empty(), "time": sim.t_total,
+			"note": Lang.t("res.clean") if clean else (sim.faults[0].msg if not sim.faults.is_empty() else Lang.t("res.ded_count", [sim.deductions.size()]))})
 	elif sim.step >= Sim.Step.TO_LOAD:
 		if exam:
 			store.data.runs = int(store.data.runs) + 1
@@ -932,55 +1113,15 @@ func _show_result() -> void:
 				store.data.best = maxi(int(store.data.best), sim.score())
 		store.add_history({"ts": ts, "mode": "exam" if exam else "practice", "score": sim.score() if sim.faults.is_empty() else 0,
 			"load": sim.part_score("load"), "unload": sim.part_score("unload"), "pass": passed, "time": sim.t_exam,
-			"note": sim.faults[0].msg if not sim.faults.is_empty() else ("감점 %d건" % sim.deductions.size() if not sim.deductions.is_empty() else "무감점")})
-	sfx.play("chime" if (passed or (mode == Mode.DRILL and sim.faults.is_empty())) else "buzzer")
+			"note": sim.faults[0].msg if not sim.faults.is_empty() else (Lang.t("res.ded_count", [sim.deductions.size()]) if not sim.deductions.is_empty() else Lang.t("res.clean"))})
+	sfx.play("chime" if (passed or (is_drill and sim.faults.is_empty())) else "buzzer")
 	sfx.buzz(120)
 	controls.visible = false
 	controls.enabled = false
 	result_panel.visible = true
 	for c in result_body.get_children():
 		c.queue_free()
-	var v := result_body
-	var head := UiKit.hbox(v, 16)
-	if mode == Mode.DRILL:
-		var ok := sim.faults.is_empty()
-		UiKit.label(head, "드릴 완료" if ok else "실격", 44, GREEN if ok else RED)
-		var sub := UiKit.label(head, "%s · %s" % [drill.title, _clock(sim.t_total)], 22, UiKit.DIM, false)
-		sub.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	else:
-		var unfinished := sim.faults.is_empty() and sim.step < Sim.Step.PARKED
-		UiKit.label(head, "합격" if passed else ("중단" if unfinished else "불합격"), 44, GREEN if passed else (UiKit.DIM if unfinished else RED))
-		var sub := UiKit.label(head, "%s · %s" % ["모의시험" if exam else "연습 코스", _clock(sim.t_exam)], 22, UiKit.DIM, false)
-		sub.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if mode != Mode.DRILL:
-		var sheet := UiKit.hbox(v, 10)
-		_score_box(sheet, "상차 작업", sim.part_score("load"), 45)
-		_score_box(sheet, "하차 작업", sim.part_score("unload"), 55)
-		_score_box(sheet, "합계", sim.score() if sim.faults.is_empty() else 0, 100, true)
-		if not sim.faults.is_empty():
-			UiKit.label(v, "실격이면 점수와 상관없이 불합격입니다.", 16, UiKit.DIM, false)
-	UiKit.rule(v)
-	var list := UiKit.vbox(v, 4)
-	for f in sim.faults:
-		var h := UiKit.hbox(list, 10)
-		UiKit.chip(h, "실격", RED, 15)
-		var l := UiKit.para(h, "%s  (%s)" % [f.msg, _clock(f.t)], 19, INK, 540)
-		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	for d in sim.deductions:
-		var h := UiKit.hbox(list, 10)
-		UiKit.chip(h, "-%d" % d.pts, ACCENT, 15)
-		var l := UiKit.para(h, d.msg, 19, INK, 540)
-		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if sim.faults.is_empty() and sim.deductions.is_empty():
-		UiKit.label(list, "감점 없이 끝냈어요. 실전에서도 이 속도면 충분합니다.", 20, GREEN, false)
-	elif not sim.faults.is_empty() and sim.step < Sim.Step.PARKED:
-		UiKit.label(list, "리플레이로 실격 5초 전부터 다시 볼 수 있어요.", 16, UiKit.DIM, false)
-	UiKit.spacer(v, 4)
-	var rr := UiKit.hbox(v, 12)
-	UiKit.button(rr, "다시 하기", func(): _start(mode), ACCENT, Vector2(200, 58))
-	UiKit.button(rr, "리플레이", _start_replay, UiKit.BLUE, Vector2(170, 58))
-	UiKit.ghost(rr, "메뉴", _show_menu, Vector2(140, 58))
-	# 궤적 지도
+	_fill_sheet(result_body, passed, is_drill)
 	var trail := PackedVector2Array()
 	for i in range(0, frames.size(), 6):
 		trail.append(frames[i][0])
@@ -989,17 +1130,80 @@ func _show_result() -> void:
 	result_course.queue_redraw()
 
 
-func _score_box(parent: Node, name: String, got: int, max_pts: int, total := false) -> void:
-	var p := UiKit.panel(parent, Color(1, 1, 1, 0.06) if not total else Color(ACCENT, 0.16), 14, 12)
-	p.custom_minimum_size = Vector2(200, 0)
-	var vb := UiKit.vbox(p, 0)
-	UiKit.label(vb, name, 16, UiKit.DIM, false)
-	var h := UiKit.hbox(vb, 4)
-	UiKit.label(h, "%d" % got, 36, ACCENT if total else INK, false)
-	var m := UiKit.label(h, "/ %d" % max_pts, 18, UiKit.DIM, false)
-	m.size_flags_vertical = Control.SIZE_SHRINK_END
+const PAPER_INK := Color(0.1, 0.1, 0.12)
+const PAPER_DIM := Color(0.1, 0.1, 0.12, 0.6)
+const PAPER_RED := Color(0.78, 0.12, 0.1)
+const PAPER_GREEN := Color(0.1, 0.5, 0.2)
 
 
+func _fill_sheet(v: VBoxContainer, passed: bool, is_drill: bool) -> void:
+	var head := UiKit.hbox(v, 16)
+	var title := UiKit.label(head, Lang.t("sheet.title"), 24, PAPER_INK, false)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var mode_name := Lang.t("mode.exam") if exam else (Lang.t("mode.practice") if not is_drill else Lang.t("mode.drill"))
+	UiKit.label(head, "%s · %s / %s" % [mode_name, _clock(sim.t_exam if not is_drill else sim.t_total), _clock(course.time_limit)], 18, PAPER_DIM, false)
+	UiKit.label(v, Lang.t("sheet.sub"), 15, PAPER_DIM, false)
+	_sheet_rule(v)
+	var verdict := ""
+	var vcol := PAPER_INK
+	if is_drill:
+		verdict = Lang.t("res.drill_ok") if sim.faults.is_empty() else Lang.t("res.dq")
+		vcol = PAPER_GREEN if sim.faults.is_empty() else PAPER_RED
+	else:
+		var unfinished := sim.faults.is_empty() and sim.step < Sim.Step.PARKED
+		verdict = Lang.t("res.pass") if passed else (Lang.t("res.stopped") if unfinished else Lang.t("res.fail"))
+		vcol = PAPER_GREEN if passed else (PAPER_DIM if unfinished else PAPER_RED)
+	for part in ["load", "unload"]:
+		var ph := UiKit.hbox(v, 8)
+		var pl := UiKit.label(ph, Lang.t("sheet.part." + part), 20, PAPER_INK, false)
+		pl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiKit.label(ph, "%d / %d" % [sim.part_score(part), Sim.PART_MAX[part]], 20, PAPER_INK, false)
+		var any := false
+		for d in sim.deductions:
+			if d.part != part:
+				continue
+			any = true
+			var r := UiKit.hbox(v, 8)
+			var pts := UiKit.label(r, "   -%d" % d.pts, 17, PAPER_RED, false)
+			pts.custom_minimum_size = Vector2(60, 0)
+			var m := ExamRules.measured(d)
+			UiKit.label(r, d.msg + ("  (" + m + ")" if m != "" else "") + "  · " + Lang.t("res.estimate"), 17, PAPER_INK, false)
+		if not any:
+			UiKit.label(v, "   " + Lang.t("sheet.no_ded"), 16, PAPER_DIM, false)
+	_sheet_rule(v)
+	var checked := ExamRules.ROWS.filter(func(r): return r.checked).size()
+	if sim.faults.is_empty():
+		UiKit.label(v, Lang.t("sheet.dq_none", [checked, ExamRules.ROWS.size()]), 18, PAPER_GREEN, false)
+	else:
+		var f: Dictionary = sim.faults[0]
+		var r := UiKit.hbox(v, 8)
+		var dl := UiKit.label(r, Lang.t("res.dq"), 18, PAPER_RED, false)
+		dl.custom_minimum_size = Vector2(60, 0)
+		var m := ExamRules.measured(f)
+		UiKit.para(r, "%s%s  ·  %s  (%s)" % [f.msg, ("  " + m) if m != "" else "", ExamRules.cite(f.code), _clock(f.t)], 18, PAPER_INK, 680)
+		UiKit.label(v, Lang.t("sheet.dq_rule"), 15, PAPER_DIM, false)
+	_sheet_rule(v)
+	var tot := UiKit.hbox(v, 12)
+	var tl := UiKit.label(tot, Lang.t("sheet.total"), 22, PAPER_INK, false)
+	tl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UiKit.label(tot, "%d" % (sim.score() if sim.faults.is_empty() else 0), 40, PAPER_INK, false)
+	var pm := UiKit.label(tot, Lang.t("sheet.pass_mark", [Sim.PASS_MARK]), 17, PAPER_DIM, false)
+	pm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var stamp := UiKit.label(tot, verdict, 40, vcol, false)
+	stamp.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UiKit.spacer(v, 6)
+	var rr := UiKit.hbox(v, 12)
+	UiKit.button(rr, Lang.t("res.again"), func(): _start(mode), ACCENT, Vector2(200, 54), 20)
+	UiKit.button(rr, Lang.t("res.replay"), _start_replay, Color(0.25, 0.45, 0.8), Vector2(170, 54), 20)
+	UiKit.button(rr, Lang.t("res.menu"), _show_menu, Color(0.25, 0.26, 0.28), Vector2(150, 54), 20)
+
+
+func _sheet_rule(v: VBoxContainer) -> void:
+	UiKit.rule(v, Color(0.1, 0.1, 0.12, 0.35))
+
+
+# ---------- replay ----------
 func _start_replay() -> void:
 	if frames.is_empty():
 		return
@@ -1014,6 +1218,8 @@ func _start_replay() -> void:
 				replay_from = i
 				break
 	replay_i = replay_from
+	replay_slider.min_value = 0
+	replay_slider.max_value = frames.size() - 1
 	cam_mode = Cam.CHASE
 
 
@@ -1021,7 +1227,16 @@ func _replay_step(dt: float) -> void:
 	replay_i += dt * 60.0
 	if replay_i >= frames.size():
 		replay_i = replay_from
-	var f: Array = frames[int(replay_i)]
+	_slider_lock = true
+	replay_slider.value = replay_i
+	_slider_lock = false
+	_apply_frame(int(replay_i))
+
+
+func _apply_frame(i: int) -> void:
+	if frames.is_empty():
+		return
+	var f: Array = frames[clampi(i, 0, frames.size() - 1)]
 	sim.pos = f[0]
 	sim.heading = f[1]
 	sim.steer = f[2]
@@ -1037,12 +1252,11 @@ func _replay_step(dt: float) -> void:
 func _end_replay() -> void:
 	replay_bar.visible = false
 	replay_i = frames.size() - 1
-	_replay_step(0.0)
+	_apply_frame(int(replay_i))
 	state = State.RESULT
 	result_panel.visible = true
 
 
-## 앱이 뒤로 가면 소리를 바로 멈추고, 돌아오면 다시 켠다.
 func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED:
@@ -1051,13 +1265,25 @@ func _notification(what: int) -> void:
 			AudioServer.set_bus_mute(0, false)
 
 
-# ---------- 스크린샷(개발용): -- shot=경로 scene=menu|cab|chase|side|top|result|icon|drills|learn|records|settings|unlock ----------
+# ---------- screenshots (debug builds only) ----------
+# -- shot=path scene=menu|cab|chase|side|top|result|freeze|icon|drills|rules|records|settings
+#    [stop=n] [mode=exam] [tab=n] [rule=rN] [lang=en]
 func _setup_shot() -> void:
 	var scene: String = _args.get("scene", "menu")
-	if scene in ["drills", "learn", "records", "settings"]:
+	if scene in ["drills", "rules", "records", "settings"]:
 		_open(scene)
-	elif scene == "unlock":
-		_show_unlock("모의시험은 전체 해제 후 쓸 수 있어요.")
+	elif scene == "freeze":
+		_start_rule(_args.get("rule", "r14"))
+		var how: Dictionary = {"r14": {lift = 1.0}, "r15": {lift = -1.0}, "r18": {lift = 1.0}, "r12": {lift = -1.0}, "r13": {lift = -1.0}}.get(drill.rule, {throttle = 0.5})
+		sim.gear = 1 if how.has("throttle") else 0
+		for i in 60 * 15:
+			sim.update(1.0 / 60.0, how)
+			_record()
+			if not sim.faults.is_empty():
+				_faults_seen = 1
+				_freeze(sim.faults[0], true)
+				break
+		set_physics_process(false)
 	elif scene != "menu":
 		_start(Mode.EXAM if _args.get("mode", "practice") == "exam" else Mode.PRACTICE)
 		var stop_at: int = int(_args.get("stop", "2"))
@@ -1069,9 +1295,9 @@ func _setup_shot() -> void:
 		controls.gear = sim.gear
 		controls.wheel_rot = -sim.steer * TAU * Controls.WHEEL_TURNS
 		controls.show_steer(sim.steer)
-		_sync_controls_buttons()
 		state = State.RUN
 		toast.text = ""
+		big.text = ""
 		match scene:
 			"cab": cam_mode = Cam.CAB
 			"chase": cam_mode = Cam.CHASE
@@ -1080,7 +1306,7 @@ func _setup_shot() -> void:
 			"result":
 				sim.done = true
 				for q in ap.log_points:
-					frames.append([q, 0.0, 0.0, 0.0, 0.0, Vector2.ZERO, 0.0, 0.0, false, 0.0])
+					frames.append([q, 0.0, 0.0, 0.0, 0.0, Vector2.ZERO, 0.0, 0.0, false, sim.t_exam])
 				_show_result()
 			"icon":
 				ui.visible = false

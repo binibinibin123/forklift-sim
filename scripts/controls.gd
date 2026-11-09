@@ -88,13 +88,13 @@ func _layout() -> void:
 	var bh := 56.0
 	var old := buttons.duplicate(true)
 	buttons = {
-		"seatbelt": {rect = Rect2(20, 20, bw, bh), label = "안전벨트", on = seatbelt},
-		"park": {rect = Rect2(20 + bw + 12, 20, bw, bh), label = "주차 브레이크", on = park_brake},
-		"signal": {rect = Rect2(20, 20 + bh + 12, bw * 2 + 12, bh), label = "시작 신호", on = false},
-		"menu": {rect = Rect2(W - bw - 20, 20, bw, bh), label = "메뉴", on = false},
-		"camera": {rect = Rect2(W - 2 * bw - 32, 20, bw, bh), label = "시점", on = false},
-		"look": {rect = Rect2(W - 3 * bw - 44, 20, bw, bh), label = "뒤 보기", on = false},
-		"horn": {rect = Rect2(_wheel_c.x + _wheel_r + 14, _wheel_c.y + 30, 104, 52), label = "경음기", on = false},
+		"seatbelt": {rect = Rect2(20, 20, bw, bh), label = Lang.t("ctl.seatbelt"), on = seatbelt},
+		"park": {rect = Rect2(20 + bw + 12, 20, bw, bh), label = Lang.t("ctl.park"), on = park_brake},
+		"signal": {rect = Rect2(20, 20 + bh + 12, bw * 2 + 12, bh), label = "", on = false},
+		"menu": {rect = Rect2(W - bw - 20, 20, bw, bh), label = Lang.t("ctl.menu"), on = false},
+		"camera": {rect = Rect2(W - 2 * bw - 32, 20, bw, bh), label = Lang.t("ctl.camera"), on = false},
+		"look": {rect = Rect2(W - 3 * bw - 44, 20, bw, bh), label = Lang.t("ctl.look_back"), on = false},
+		"horn": {rect = Rect2(_wheel_c.x + _wheel_r + 14, _wheel_c.y + 30, 104, 52), label = Lang.t("ctl.horn"), on = false},
 	}
 	for b in old:
 		if buttons.has(b):
@@ -279,15 +279,15 @@ func _draw() -> void:
 		var ra := _sim_steer * Sim.MAX_STEER
 		var dv := Vector2(sin(ra), cos(ra)) * 10
 		draw_line(rp - dv, rp + dv, Color(0.1, 0.1, 0.1), 8.0)
-	_text(ic + Vector2(-60, 64), "뒷바퀴", 18, DIM, HORIZONTAL_ALIGNMENT_CENTER, 120)
+	_text(ic + Vector2(-60, 64), Lang.t("ctl.rear_wheels"), 18, DIM, HORIZONTAL_ALIGNMENT_CENTER, 120)
 
 	# 레버
-	_lever("gear", ["전진", "중립", "후진"])
-	_spring_lever("lift", lift, "리프트", "내림", "올림")
-	_spring_lever("tilt", tilt, "틸트", "숙임", "젖힘")
+	_lever("gear", [Lang.t("gear.f"), Lang.t("gear.n"), Lang.t("gear.r")])
+	_spring_lever("lift", lift, Lang.t("ctl.lift"), Lang.t("ctl.lower"), Lang.t("ctl.raise"))
+	_spring_lever("tilt", tilt, Lang.t("ctl.tilt"), Lang.t("ctl.fwd"), Lang.t("ctl.back"))
 	# 페달
-	_pedal("brake", brake, "브레이크", RED)
-	_pedal("accel", throttle, "가속", GREEN)
+	_pedal("brake", brake, Lang.t("ctl.brake"), RED)
+	_pedal("accel", throttle, Lang.t("ctl.accel"), GREEN)
 
 
 func _lever(k: String, names: Array) -> void:
@@ -300,7 +300,7 @@ func _lever(k: String, names: Array) -> void:
 		var on := i == idx
 		_text(Vector2(r.position.x, ys[i] + 8), names[i], 21 if on else 18, ACCENT if on else DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	draw_circle(Vector2(r.get_center().x, ys[idx] - 22), 12, ACCENT)
-	_text(Vector2(r.position.x, r.position.y - 10), "전후진", 18, DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	_text(Vector2(r.position.x, r.position.y - 10), Lang.t("ctl.direction"), 18, DIM, HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 
 
 func _spring_lever(k: String, v: float, title: String, up: String, down: String) -> void:

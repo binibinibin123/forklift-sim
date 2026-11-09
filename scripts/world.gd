@@ -93,8 +93,9 @@ func _ground(b: Rect2) -> void:
 	if Mats.compat:
 		worn.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		worn.albedo_color = Color(0.64, 0.64, 0.63)
-	for r in course.rects:
+	for r in [course.box, course.conn, course.stub]:
 		box(self, Vector3(r.size.x, 0.004, r.size.y), v3(r.get_center(), 0.002), worn)
+	_course_surface(worn)
 	# 연석(야드 가장자리)
 	var curb := Mats.tex("concrete", Vector3(2, 2, 2), 0.9, 0.0, Color(0.85, 0.85, 0.82))
 	for e in _edges(_yard):
@@ -109,28 +110,84 @@ static func _edges(r: Rect2) -> Array:
 	return [[p[0], p[1]], [p[1], p[2]], [p[2], p[3]], [p[3], p[0]]]
 
 
+## Ring + cross arms as one flat mesh (the box and stub are plain boxes).
+func _course_surface(m: Material) -> void:
+	var c := course
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 160
+	var h := 0.003
+	for i in n:
+		var a0 := TAU * i / n
+		var a1 := TAU * (i + 1) / n
+		var u0 := Vector2(cos(a0), sin(a0))
+		var u1 := Vector2(cos(a1), sin(a1))
+		_quad(st, c.center + u0 * c.r_in, c.center + u0 * c.r_out, c.center + u1 * c.r_out, c.center + u1 * c.r_in, h)
+	var L := sqrt(c.r_out * c.r_out - c.hw * c.hw)
+	var cc := c.center
+	_quad(st, cc + Vector2(-L, -c.hw), cc + Vector2(L, -c.hw), cc + Vector2(L, c.hw), cc + Vector2(-L, c.hw), h)
+	_quad(st, cc + Vector2(-c.hw, -L), cc + Vector2(-c.hw, L), cc + Vector2(c.hw, L), cc + Vector2(c.hw, -L), h + 0.0005)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = m
+	add_child(mi)
+
+
+func _quad(st: SurfaceTool, a: Vector2, b: Vector2, c: Vector2, d: Vector2, h: float) -> void:
+	for p in [a, c, b, a, d, c]:
+		st.add_vertex(v3(p, h))
+
+
+## Painted lines along polylines, one mesh per colour.
+func _paint(lines: Array, m: Material, w: float, h: float) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for pl in lines:
+		for i in pl.size() - 1:
+			var a: Vector2 = pl[i]
+			var b: Vector2 = pl[i + 1]
+			var d := (b - a).normalized()
+			var nn := Vector2(-d.y, d.x) * w * 0.5
+			a -= d * w * 0.25
+			b += d * w * 0.25
+			var uv0 := Vector2(0, 0)
+			for p in [[a - nn, uv0], [b + nn, Vector2(1, 1)], [b - nn, Vector2(1, 0)], [a - nn, uv0], [a + nn, Vector2(0, 1)], [b + nn, Vector2(1, 1)]]:
+				st.set_uv(p[1])
+				st.set_normal(Vector3.UP)
+				st.add_vertex(v3(p[0], h))
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = m
+	add_child(mi)
+
+
 # ---------- 도색선 ----------
 func _lines(c: Course) -> void:
 	var line_m := Mats.cutout("line_wear", Vector3(0.4, 0.4, 0.4))
 	line_m.albedo_color = YELLOW
 	line_m.roughness = 0.7
 	line_m.metallic = 0.0
-	for seg in c.boundary_segments():
-		_line(seg[0], seg[1], line_m, 0.006)
+	_paint(c.boundary_polylines(), line_m, LINE_W, 0.006)
 	var white := Mats.cutout("line_wear", Vector3(0.4, 0.4, 0.4))
 	white.albedo_color = WHITE
 	white.roughness = 0.7
 	white.metallic = 0.0
-	var sr: Rect2 = c.zones["start"]
-	_line(Vector2(sr.position.x, c.start_line_y), Vector2(sr.end.x, c.start_line_y), white, 0.008, 0.14)
-	var top_r := _rect_containing(Vector2(c.back_line_x, c.unload_target.y))
-	_line(Vector2(c.back_line_x, top_r.position.y), Vector2(c.back_line_x, top_r.end.y), white, 0.008, 0.14)
-	_square(c.unload_target, c.unload_heading, Sim.PALLET + 0.04, white)
-	# 바닥 글씨: 출발/도착, 후진선, 하역
-	_floor_text("출발 · 도착", Vector2(0.0, c.start_line_y - 0.5), PI / 2, 0.32)
-	_floor_text("후진선", Vector2(c.back_line_x + 0.35, top_r.get_center().y), 0.0, 0.26)
-	_floor_text("하역 위치", c.unload_target + Vector2(0, -0.95), 0.0, 0.22)
-	# 야드 주차 구획선(코스 밖 장식)
+	var bx := c.box
+	var cy := c.center.y
+	_paint([
+		[Vector2(bx.position.x, c.start_line_y), Vector2(bx.end.x, c.start_line_y)],
+		[Vector2(bx.position.x, c.park_line_y), Vector2(bx.end.x, c.park_line_y)],
+		[Vector2(bx.position.x, c.load_line_y), Vector2(bx.end.x, c.load_line_y)],
+		[Vector2(c.back_line_x, cy - c.hw), Vector2(c.back_line_x, cy + c.hw)],
+		[Vector2(c.unload_line_x, cy - c.hw), Vector2(c.unload_line_x, cy + c.hw)],
+	], white, 0.14, 0.008)
+	_floor_text(Lang.t("course.start_line"), Vector2(0.0, c.start_line_y - 0.45), PI / 2, 0.28)
+	_floor_text(Lang.t("course.park_line"), Vector2(0.0, c.park_line_y + 0.4), PI / 2, 0.22)
+	_floor_text(Lang.t("course.back_line"), Vector2(c.back_line_x + 0.45, cy), 0.0, 0.24)
+	_floor_text(Lang.t("course.unload_line"), Vector2(c.unload_line_x + 0.4, cy), 0.0, 0.2)
+	_floor_text(Lang.t("course.load_line"), Vector2(0.0, c.load_line_y - 0.4), PI / 2, 0.2)
+	# yard parking bays (decoration outside the course)
 	var faded := Mats.cutout("line_wear", Vector3(0.4, 0.4, 0.4))
 	faded.albedo_color = Color(0.85, 0.85, 0.8, 0.9)
 	for i in 6:
@@ -152,25 +209,9 @@ func _floor_text(t: String, p: Vector2, ang: float, px := 0.3) -> void:
 	add_child(l)
 
 
-func _rect_containing(p: Vector2) -> Rect2:
-	for r in course.rects:
-		if r.has_point(p):
-			return r
-	return course.rects[0]
-
-
 func _line(a: Vector2, b: Vector2, m: Material, h := 0.006, w := LINE_W) -> void:
 	var mi := box(self, Vector3(a.distance_to(b) + w, h, w), v3((a + b) * 0.5, h * 0.5), m)
 	mi.rotation.y = (b - a).angle()
-
-
-func _square(c: Vector2, ang: float, s: float, m: Material) -> void:
-	var h := s * 0.5
-	var pts := []
-	for k: Vector2 in [Vector2(-h, -h), Vector2(h, -h), Vector2(h, h), Vector2(-h, h)]:
-		pts.append(c + k.rotated(ang))
-	for i in 4:
-		_line(pts[i], pts[(i + 1) % 4], m, 0.007, 0.07)
 
 
 # ---------- 드럼·팔레트 ----------
@@ -180,6 +221,9 @@ func _drum_and_pallets(c: Course) -> void:
 	drum.position = v3(c.drum_pos)
 	pallet = make_pallet(Color(0.95, 0.85, 0.7))
 	add_child(pallet)
+	# the 30 kg load strapped on the moving pallet
+	var crate := Mats.tex("wood", Vector3(1, 1, 1), 0.85, 0.0, Color(0.8, 0.62, 0.4))
+	box(pallet, Vector3(0.42, 0.36, 0.42), Vector3(0, Sim.PALLET_H + 0.18, 0), crate)
 	guide = make_pallet(Color(1.0, 0.8, 0.45))
 	add_child(guide)
 	guide.position = v3(c.guide_pos)

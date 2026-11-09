@@ -131,7 +131,7 @@ static func screen(parent: Control, title: String, on_back: Callable) -> Diction
 	root.add_child(margin)
 	var v := vbox(margin, 10)
 	var head := hbox(v, 16)
-	ghost(head, "←  뒤로", on_back, Vector2(130, 50), 20)
+	ghost(head, Lang.t("ui.back"), on_back, Vector2(130, 50), 20)
 	var t := label(head, title, 34, ACCENT)
 	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var scroll := ScrollContainer.new()
