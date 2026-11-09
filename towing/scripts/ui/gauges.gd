@@ -35,11 +35,11 @@ func _draw() -> void:
 	draw_line(c, c + nd * (r - 20), Color.WHITE, 4.0, true)
 	draw_circle(c, 6.0, Color.WHITE)
 	var deg := absf(rad_to_deg(b))
-	var txt := "히치각 %d°" % int(round(deg)) if coupled else "분리됨"
+	var txt := Lang.t("tow.gauge.hitch") % int(round(deg)) if coupled else Lang.t("tow.gauge.free")
 	var col := Kit.GREEN if deg < 30 else (Kit.AMBER if deg < 60 else Kit.RED)
 	var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 18).x
 	draw_string(f, Vector2(c.x - w * 0.5, size.y - 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, col if coupled else Kit.MUTED)
 	if coupled and deg > 60:
-		var warn := "잭나이프 주의"
+		var warn := Lang.t("tow.gauge.warn")
 		var ww := f.get_string_size(warn, HORIZONTAL_ALIGNMENT_CENTER, -1, 15).x
 		draw_string(f, Vector2(c.x - ww * 0.5, c.y - r * 0.35), warn, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Kit.RED)

@@ -5,10 +5,10 @@ extends RefCounted
 ## the exam courses so Exam, TowAutopilot and TowWorld handle them unchanged.
 
 const LIST := [
-	{"id": "straight_back", "title": "직진 후진", "desc": "트레일러를 흔들리지 않게 20 m 똑바로 후진", "free": true},
-	{"id": "back_90", "title": "90도 후진", "desc": "오른쪽 주차칸으로 직각 후진", "free": false},
-	{"id": "s_back", "title": "S자 후진", "desc": "구불구불한 통로를 후진으로 통과", "free": false},
-	{"id": "free", "title": "자유 연습", "desc": "넓은 마당에서 마음껏 연결·후진 연습", "free": false},
+	{"id": "straight_back", "title": "tow.drill.straight_back", "desc": "tow.drill.straight_back.d", "free": true},
+	{"id": "back_90", "title": "tow.drill.back_90", "desc": "tow.drill.back_90.d", "free": false},
+	{"id": "s_back", "title": "tow.drill.s_back", "desc": "tow.drill.s_back.d", "free": false},
+	{"id": "free", "title": "tow.drill.free", "desc": "tow.drill.free.d", "free": false},
 ]
 
 
@@ -53,15 +53,15 @@ static func _straight(kind: String, o: Vector2) -> Dictionary:
 	var lines := [PackedVector2Array([Vector2(-w * 0.5, len + lead), Vector2(-w * 0.5, 0.0)]),
 		PackedVector2Array([Vector2(w * 0.5, len + lead), Vector2(w * 0.5, 0.0)])]
 	var step := {
-		"id": "straight_back", "type": "course", "title": "직진 후진", "kind": kind, "time_limit": 120.0,
+		"id": "straight_back", "type": "course", "title": Lang.t("tow.drill.straight_back"), "kind": kind, "time_limit": 120.0,
 		"lines": lines, "confirms": [],
 		"finish": {"a": Vector2(-w * 0.5, 0.0), "b": Vector2(w * 0.5, 0.0), "dir": Vector2(0, -1), "who": "last"},
 		"start": {"pos": Vector2(0, len + spec.c + spec.trailer.back + 1.0), "th": PI / 2},
 		"demo": [{"dir": -1, "path": PackedVector2Array([Vector2(0, len + 30.0), Vector2(0, -30.0)]), "until": "finish", "follow": "trailer"}],
 		"asphalt": [Rect2(Vector2(-w * 0.5 - 4.0, -8.0), Vector2(w + 8.0, len + lead + 12.0))],
-		"tips": ["트레일러가 한쪽으로 가기 시작하면 핸들을 그쪽으로 아주 조금만 돌려 바로잡아요.",
-			"핸들을 크게 돌릴수록 트레일러는 빨리 꺾여요. 작게, 자주."],
-		"coach": "직진 후진이에요. 사이드미러로 트레일러를 보며 작게 바로잡으세요",
+		"tips": [Lang.t("tow.drill.sb.t1"),
+			Lang.t("tow.drill.sb.t2")],
+		"coach": Lang.t("tow.drill.sb.coach"),
 	}
 	return Courses._place(step, o)
 
@@ -85,17 +85,17 @@ static func _back90(kind: String, o: Vector2) -> Dictionary:
 	rev.append_array(Courses.arc(Vector2(x0 + r, gy + r), r, PI, PI * 1.5, 16))
 	rev.append(Vector2(conf_x + 8.0, gy))
 	var step := {
-		"id": "back_90", "type": "course", "title": "90도 후진", "kind": kind, "time_limit": 180.0,
+		"id": "back_90", "type": "course", "title": Lang.t("tow.drill.back_90"), "kind": kind, "time_limit": 180.0,
 		"lines": lines,
-		"confirms": [{"id": "B", "label": "확인선", "a": Vector2(conf_x, gy - bw * 0.5), "b": Vector2(conf_x, gy + bw * 0.5), "who": "trailer_rear"}],
+		"confirms": [{"id": "B", "label": Lang.t("tow.c.confirm"), "a": Vector2(conf_x, gy - bw * 0.5), "b": Vector2(conf_x, gy + bw * 0.5), "who": "trailer_rear"}],
 		"finish": {"a": Vector2(conf_x, gy - bw * 0.5), "b": Vector2(conf_x, gy + bw * 0.5), "dir": Vector2(1, 0), "who": "last", "after": "B"},
 		"start": {"pos": Vector2(x0, -2.0 - spec.L - spec.front_oh + 4.0), "th": PI / 2},
 		"demo": [{"dir": 1, "path": PackedVector2Array([Vector2(x0, -40.0), Vector2(x0, top + 20.0)]), "until": "stop", "stop": gy + r + 2.0 + spec.c + spec.trailer.D},
 			{"dir": -1, "path": rev, "until": "finish", "follow": "trailer"}],
 		"asphalt": [Rect2(Vector2(-xr - 3.0, -8.0 - _rig_len(kind)), Vector2(rw + 5.0 + depth, top + 12.0 + _rig_len(kind)))],
-		"tips": ["칸 입구를 지나 트레일러 바퀴가 입구보다 한 차 길이쯤 위에 올 때까지 올라가세요.",
-			"핸들을 왼쪽으로 감아 트레일러 꼬리를 오른쪽 칸으로 보내고, 꺾이기 시작하면 바로 풀어요."],
-		"coach": "90도 후진이에요. 꼬리를 보낼 반대쪽으로 핸들을 먼저 감으세요",
+		"tips": [Lang.t("tow.drill.b90.t1"),
+			Lang.t("tow.drill.b90.t2")],
+		"coach": Lang.t("tow.drill.b90.coach"),
 	}
 	return Courses._place(step, o)
 
@@ -116,15 +116,15 @@ static func _sback(kind: String, o: Vector2) -> Dictionary:
 	var last := center[center.size() - 1]
 	var end_y := last.y + lead + 2.0
 	var step := {
-		"id": "s_back", "type": "course", "title": "S자 후진", "kind": kind, "time_limit": 240.0,
+		"id": "s_back", "type": "course", "title": Lang.t("tow.drill.s_back"), "kind": kind, "time_limit": 240.0,
 		"lines": [lr[0], lr[1]], "confirms": [],
 		"finish": {"a": Vector2(2.0 * r - w * 0.5, end_y), "b": Vector2(2.0 * r + w * 0.5, end_y), "dir": Vector2(0, -1), "who": "last"},
 		"start": {"pos": Vector2(0, lead + 2.0 + spec.c + spec.trailer.back), "th": PI / 2},
 		"demo": [{"dir": -1, "path": _reverse_path(center, 40.0), "until": "finish", "follow": "trailer"}],
 		"asphalt": [Courses._bounds([lr[0], lr[1]], 8.0)],
-		"tips": ["트레일러 꼬리가 갈 방향의 반대로 핸들을 돌려 커브에 넣고, 바로 되돌려 따라가게 하세요.",
-			"한 번에 한 커브만 생각하세요. 꺾임이 커지면 멈추고 조금 전진해 펴세요."],
-		"coach": "S자 후진이에요. 꺾임이 커지기 전에 핸들을 되돌리세요",
+		"tips": [Lang.t("tow.drill.s.t1"),
+			Lang.t("tow.drill.s.t2")],
+		"coach": Lang.t("tow.drill.s.coach"),
 	}
 	return Courses._place(step, o)
 
@@ -143,7 +143,7 @@ static func _free(kind: String, o: Vector2) -> Dictionary:
 	var spec: Dictionary = Rig.SPECS[kind]
 	var half := 45.0
 	var step := {
-		"id": "free", "type": "course", "title": "자유 연습", "kind": kind, "time_limit": 1e9,
+		"id": "free", "type": "course", "title": Lang.t("tow.drill.free"), "kind": kind, "time_limit": 1e9,
 		"lines": [], "confirms": [],
 		"paint": [PackedVector2Array([Vector2(-half + 10, -half + 10), Vector2(half - 10, -half + 10), Vector2(half - 10, half - 10), Vector2(-half + 10, half - 10), Vector2(-half + 10, -half + 10)]),
 			PackedVector2Array([Vector2(-6, 0), Vector2(6, 0)]), PackedVector2Array([Vector2(0, -6), Vector2(0, 6)])],
@@ -151,8 +151,8 @@ static func _free(kind: String, o: Vector2) -> Dictionary:
 		"start": {"pos": Vector2(0, -spec.L), "th": PI / 2},
 		"demo": [{"dir": 1, "path": PackedVector2Array([Vector2(0, -60), Vector2(0, 60)]), "until": "finish"}],
 		"asphalt": [Rect2(Vector2(-half, -half), Vector2(half * 2.0, half * 2.0))],
-		"tips": ["점수도 시간도 없어요. 핸들 방향과 트레일러 움직임의 관계를 몸으로 익히세요."],
-		"coach": "자유 연습이에요. 시간 제한 없이 마음껏 해 보세요",
+		"tips": [Lang.t("tow.drill.free.t1")],
+		"coach": Lang.t("tow.drill.free.coach"),
 		"free_run": true,
 	}
 	return Courses._place(step, o)

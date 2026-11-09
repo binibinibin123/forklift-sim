@@ -1,12 +1,16 @@
 class_name ResultScreen
 extends Control
-## The debrief after a run: verdict, score ring, stars, every deduction with
-## its time, new best / badges, and what to do next.
+## The debrief after a run, laid out like the examiner's score sheet: the
+## 별표24 rows for this licence (항목 / 기준 / 감점 / this run), the total
+## against the 90-point pass mark, every recorded violation with what was
+## measured, new best / badges, and what to do next.
 
 signal retry_pressed
 signal next_pressed
 signal replay_pressed
 signal home_pressed
+
+const COLS := [250, 300, 120, 90]   # item, rule, points, this run
 
 var panel: PanelContainer
 var title_lbl: Label
@@ -15,6 +19,7 @@ var ring_score := 100
 var ring_pass := true
 var stars_lbl: Label
 var meta_lbl: Label
+var sheet_head: Label
 var body: VBoxContainer
 var next_btn: Button
 var replay_btn: Button
@@ -28,15 +33,15 @@ func _ready() -> void:
 	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
 	cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(cc)
-	panel = Kit.panel(Kit.BG_SOLID, 24, 24)
+	panel = Kit.panel(Kit.BG_SOLID, 24, 22)
 	cc.add_child(panel)
-	var h := Kit.hbox(26)
+	var h := Kit.hbox(24)
 	panel.add_child(h)
 	# left: ring + verdict
 	var left := Kit.vbox(8)
 	left.alignment = BoxContainer.ALIGNMENT_CENTER
 	h.add_child(left)
-	title_lbl = Kit.label("합격", 44, Kit.GREEN, HORIZONTAL_ALIGNMENT_CENTER)
+	title_lbl = Kit.label(Lang.t("tow.res.pass"), 44, Kit.GREEN, HORIZONTAL_ALIGNMENT_CENTER)
 	left.add_child(title_lbl)
 	ring = Control.new()
 	ring.custom_minimum_size = Vector2(170, 170)
@@ -45,31 +50,31 @@ func _ready() -> void:
 	stars_lbl = Kit.stars(3, 30)
 	stars_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	left.add_child(stars_lbl)
-	meta_lbl = Kit.label("", 18, Kit.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	meta_lbl = Kit.label("", 17, Kit.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	left.add_child(meta_lbl)
-	# right: breakdown + actions
-	var right := Kit.vbox(8)
-	right.custom_minimum_size.x = 470
+	# right: the score sheet + actions
+	var right := Kit.vbox(6)
+	right.custom_minimum_size.x = 800
 	h.add_child(right)
-	right.add_child(Kit.label("채점 내역", 22, Kit.PRIMARY))
+	sheet_head = Kit.label("", 22, Kit.PRIMARY)
+	right.add_child(sheet_head)
 	var sc := ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(470, 190)
+	sc.custom_minimum_size = Vector2(800, 330)
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	right.add_child(sc)
-	body = Kit.vbox(4)
+	body = Kit.vbox(3)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.add_child(body)
 	badge_row = Kit.hbox(8)
 	right.add_child(badge_row)
-	right.add_child(Kit.spacer(false))
 	var btns := Kit.hbox(10)
 	right.add_child(btns)
-	replay_btn = Kit.button("리플레이", func(): replay_pressed.emit(), 21, "ghost")
+	replay_btn = Kit.button(Lang.t("tow.res.replay"), func(): replay_pressed.emit(), 21, "ghost")
 	btns.add_child(replay_btn)
-	btns.add_child(Kit.button("다시 하기", func(): retry_pressed.emit(), 21))
-	next_btn = Kit.button("다음 코스", func(): next_pressed.emit(), 21, "primary")
+	btns.add_child(Kit.button(Lang.t("tow.res.retry"), func(): retry_pressed.emit(), 21))
+	next_btn = Kit.button(Lang.t("tow.res.next"), func(): next_pressed.emit(), 21, "primary")
 	btns.add_child(next_btn)
-	btns.add_child(Kit.button("목록", func(): home_pressed.emit(), 21, "ghost"))
+	btns.add_child(Kit.button(Lang.t("tow.res.list"), func(): home_pressed.emit(), 21, "ghost"))
 
 
 func _draw_ring() -> void:
@@ -87,16 +92,15 @@ func _draw_ring() -> void:
 	var txt := "%d" % ring_score
 	var w := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 54).x
 	ring.draw_string(f, c + Vector2(-w * 0.5, 18), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 54, Color.WHITE)
-	var sub := "점"
-	ring.draw_string(f, c + Vector2(w * 0.5 + 2, 18), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Kit.MUTED)
+	ring.draw_string(f, c + Vector2(w * 0.5 + 2, 18), Lang.t("tow.res.pts_unit"), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Kit.MUTED)
 
 
 func show_result(exam: Exam, rec: Dictionary, new_badges: Array, has_next: bool, demo: bool) -> void:
 	var ok := exam.passed
 	var free_run: bool = exam.step.get("free_run", false)
-	title_lbl.text = "합격" if ok else ("실격" if exam.disqualified != "" else "불합격")
+	title_lbl.text = Lang.t("tow.res.pass") if ok else (Lang.t("tow.r.dq") if exam.disqualified != "" else Lang.t("tow.res.fail"))
 	if free_run:
-		title_lbl.text = "자유 연습 종료"
+		title_lbl.text = Lang.t("tow.res.free_done")
 	title_lbl.add_theme_color_override("font_color", Kit.GREEN if ok else Kit.RED)
 	ring_score = exam.score
 	ring_pass = ok
@@ -104,41 +108,66 @@ func show_result(exam: Exam, rec: Dictionary, new_badges: Array, has_next: bool,
 	var st := int(rec.get("stars", TowStore.stars_for(exam.score, ok, exam.disqualified != "")))
 	stars_lbl.text = Kit.stars(st).text
 	stars_lbl.add_theme_color_override("font_color", Kit.GOLD if st > 0 else Color(1, 1, 1, 0.35))
-	var meta := "%s 소요" % Kit.fmt_time(exam.t_total)
+	var meta := Lang.t("tow.res.took", [Kit.fmt_time(exam.t_total)])
 	if rec.get("better", false):
-		meta += "  ·  최고 기록!"
+		meta += "  ·  " + Lang.t("tow.res.new_best")
 	elif rec.has("best"):
-		meta += "  ·  최고 %d점" % int(rec.best)
+		meta += "  ·  " + Lang.t("tow.home.best", [int(rec.best)])
 	if demo:
-		meta = "모범 주행 · 기록되지 않아요"
+		meta = Lang.t("tow.res.demo")
 	meta_lbl.text = meta
+	var what := Lang.t("tow.home.exam_card", [HomeScreen.kind_name(exam.kind)]) if not exam.practice else HomeScreen.kind_name(exam.kind) + " · " + str(exam.step.title)
+	sheet_head.text = Lang.t("tow.res.sheet", [what])
 	for c in body.get_children():
 		c.queue_free()
-	if exam.disqualified != "":
-		body.add_child(_row("실격", exam.disqualified, Kit.RED))
-	for d in exam.deductions:
-		body.add_child(_row("-%d" % d.points, d.text, Kit.AMBER))
-	if exam.deductions.is_empty() and exam.disqualified == "":
-		body.add_child(_row("", "감점 없이 통과했어요. 완벽해요!" if ok else "", Kit.GREEN))
 	if not free_run:
-		body.add_child(Kit.wrap("합격 기준 %d점. 실제 시험은 시험장 안내를 따르세요." % Exam.PASS, 16, Kit.MUTED, 440))
+		_sheet(exam)
 	for c in badge_row.get_children():
 		c.queue_free()
 	for id in new_badges:
 		var b := Badges.info(id)
-		badge_row.add_child(Kit.chip("%s %s 획득" % [b.get("icon", ""), b.get("title", id)], Kit.GOLD.darkened(0.45), 17))
+		badge_row.add_child(Kit.chip(Lang.t("tow.res.badge", [b.get("icon", ""), Lang.t(b.get("title", id))]), Kit.GOLD.darkened(0.45), 17))
 	next_btn.visible = has_next
 	replay_btn.visible = not free_run
 	visible = true
 	panel.reset_size()
 
 
-func _row(tag: String, text: String, col: Color) -> Control:
-	var h := Kit.hbox(8)
-	if tag != "":
-		var t := Kit.label(tag, 18, col)
-		t.custom_minimum_size.x = 44
-		h.add_child(t)
-	var l := Kit.wrap(text, 18, Kit.TEXT if tag != "" else col, 400)
-	h.add_child(l)
+func _sheet(exam: Exam) -> void:
+	body.add_child(_cells([Lang.t("tow.rb.col_item"), Lang.t("tow.res.col_rule"), Lang.t("tow.rb.col_pts"), Lang.t("tow.res.col_run")], Kit.MUTED, 15))
+	body.add_child(Kit.divider())
+	for r in TowRules.rows_for(exam.kind):
+		var run := TowRules.run_text(r, exam)
+		var col := Kit.TEXT if run == "0" else (Kit.RED if run == Lang.t("tow.r.dq") else Kit.AMBER)
+		body.add_child(_cells([Lang.t(r.title), Lang.t(r.crit), TowRules.points_text(r, exam.kind), run], col, 16, r.src != "law"))
+	body.add_child(Kit.divider())
+	var total := Kit.hbox(12)
+	body.add_child(total)
+	total.add_child(Kit.label(Lang.t("tow.res.total", [exam.score]), 22, Kit.GREEN if exam.passed else Kit.RED))
+	var pm := Kit.label(Lang.t("tow.res.pass_mark", [Exam.PASS]), 16, Kit.MUTED)
+	pm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	total.add_child(pm)
+	# what was measured at each violation
+	var events: Array = exam.deductions.duplicate()
+	if not exam.dq_info.is_empty():
+		events.append(exam.dq_info)
+	if events.is_empty():
+		body.add_child(Kit.label(Lang.t("tow.res.clean"), 17, Kit.GREEN))
+	else:
+		body.add_child(Kit.label(Lang.t("tow.res.measured"), 16, Kit.PRIMARY))
+		for v in events:
+			var line := "%s  %s" % [Kit.fmt_time(float(v.get("t", 0.0))), TowRules.headline(v)]
+			body.add_child(Kit.wrap(line, 15, Kit.RED if bool(v.get("dq", false)) else Kit.AMBER, 780))
+	body.add_child(Kit.wrap(Lang.t("tow.res.src_note"), 13, Color(1, 1, 1, 0.5), 780))
+
+
+func _cells(texts: Array, col: Color, size: int, app_row := false) -> Control:
+	var h := Kit.hbox(10)
+	for i in texts.size():
+		var t: String = texts[i]
+		if i == 0 and app_row:
+			t += " *"
+		var l := Kit.wrap(t, size, col if i != 1 else Kit.MUTED, COLS[i])
+		l.custom_minimum_size.x = COLS[i]
+		h.add_child(l)
 	return h

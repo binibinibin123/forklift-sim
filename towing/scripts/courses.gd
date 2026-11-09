@@ -164,7 +164,7 @@ static func crank(kind: String, o: Vector2) -> Dictionary:
 	var demo_path := fillet_path(PackedVector2Array([Vector2(0, -lead + 4.0), Vector2(0, z.ca), Vector2(z.cb, z.ca),
 		Vector2(z.cb, fin_y + _rig_len(kind) + 10.0)]), z.fr, z.fs)
 	var step := {
-		"id": "crank", "type": "course", "title": "굴절코스", "kind": kind,
+		"id": "crank", "type": "course", "title": Lang.t("tow.c.crank"), "kind": kind,
 		"time_limit": 180.0,
 		"lines": lr,
 		"confirms": [],
@@ -173,9 +173,9 @@ static func crank(kind: String, o: Vector2) -> Dictionary:
 		"demo": [{"dir": 1, "path": demo_path, "until": "finish"}],
 		"asphalt": [_bounds(lr, 3.0)],
 		"tips": [
-			"꺾이는 곳 직전에 바깥쪽으로 붙어서 들어가세요. 트레일러 바퀴는 트럭보다 안쪽으로 돌아요.",
-			"트럭 앞바퀴가 모서리를 지나고 나서 핸들을 크게 감으면 트레일러 뒷바퀴가 안쪽 선을 덜 밟아요.",
-			"두 번째 굴절에서 트레일러 뒷바퀴 탈선이 가장 많아요. 사이드미러로 트레일러 바퀴를 보세요.",
+			Lang.t("tow.c.crank.t1"),
+			Lang.t("tow.c.crank.t2"),
+			Lang.t("tow.c.crank.t3"),
 		],
 	}
 	return _place(step, o)
@@ -216,7 +216,7 @@ static func curve(kind: String, o: Vector2) -> Dictionary:
 	var top: float = center[center.size() - 1].y - 5.0 - _rig_len(kind)
 	var xend: float = center[center.size() - 1].x
 	var step := {
-		"id": "curve", "type": "course", "title": "곡선코스", "kind": kind,
+		"id": "curve", "type": "course", "title": Lang.t("tow.c.curve"), "kind": kind,
 		"time_limit": 180.0,
 		"lines": lr,
 		"confirms": [],
@@ -225,9 +225,9 @@ static func curve(kind: String, o: Vector2) -> Dictionary:
 		"demo": [{"dir": 1, "path": _s_demo(center, z.sw * z.sk), "until": "finish"}],
 		"asphalt": [_bounds(lr, 3.0)],
 		"tips": [
-			"곡선에서는 트럭을 바깥쪽 선 가까이 두세요. 트레일러는 안쪽으로 파고들어요.",
-			"핸들은 한 번에 크게 꺾지 말고 곡선을 따라 조금씩 감고 풀어 주세요.",
-			"S자 가운데에서 방향이 바뀔 때 핸들을 반대로 넘기기 전에 트레일러가 따라왔는지 보세요.",
+			Lang.t("tow.c.curve.t1"),
+			Lang.t("tow.c.curve.t2"),
+			Lang.t("tow.c.curve.t3"),
 		],
 	}
 	return _place(step, o)
@@ -295,8 +295,8 @@ static func garage(kind: String, o: Vector2) -> Dictionary:
 		Vector2(xr, gy - gw * 0.5), Vector2(xr, bottom)]))
 	var confirms := []
 	if kind == "large":
-		confirms.append({"id": "A", "label": "A 확인선", "a": Vector2(-xr, top - 1.6), "b": Vector2(xr, top - 1.6), "who": "tractor_front"})
-	confirms.append({"id": "B", "label": "B 확인선" if kind == "large" else "확인선", "a": Vector2(conf_x, gy - gw * 0.5), "b": Vector2(conf_x, gy + gw * 0.5), "who": "tractor_rear" if solo else "trailer_rear"})
+		confirms.append({"id": "A", "label": Lang.t("tow.c.confirm_a"), "a": Vector2(-xr, top - 1.6), "b": Vector2(xr, top - 1.6), "who": "tractor_front"})
+	confirms.append({"id": "B", "label": Lang.t("tow.c.confirm_b") if kind == "large" else Lang.t("tow.c.confirm"), "a": Vector2(conf_x, gy - gw * 0.5), "b": Vector2(conf_x, gy + gw * 0.5), "who": "tractor_rear" if solo else "trailer_rear"})
 	# demo: up the lane, back into the bay, out to the left and down
 	var stop_y: float = top - 1.6 - spec.L if kind == "large" else gy + r + 1.5 + back
 	var demo := []
@@ -315,7 +315,7 @@ static func garage(kind: String, o: Vector2) -> Dictionary:
 	out.append(Vector2(x_out, bottom - 60.0))
 	demo.append({"dir": 1, "path": out, "until": "finish"})
 	var step := {
-		"id": "garage", "type": "course", "title": "방향전환코스", "kind": kind,
+		"id": "garage", "type": "course", "title": Lang.t("tow.c.garage"), "kind": kind,
 		"time_limit": 300.0 if kind == "large" else 180.0,
 		"lines": lines,
 		"confirms": confirms,
@@ -331,30 +331,35 @@ static func garage(kind: String, o: Vector2) -> Dictionary:
 
 static func _garage_tips(kind: String) -> Array:
 	var t := [
-		"트레일러 후진은 핸들을 반대로: 트레일러 꼬리를 오른쪽으로 보내려면 핸들을 왼쪽으로 먼저 감아요.",
-		"트레일러가 원하는 만큼 꺾이기 시작하면 핸들을 반대로 풀어 트럭이 트레일러를 따라가게 하세요.",
-		"후진 중에 많이 틀어졌으면 무리하지 말고 조금 전진해서 펴고 다시 후진하세요.",
+		Lang.t("tow.c.garage.t1"),
+		Lang.t("tow.c.garage.t2"),
+		Lang.t("tow.c.garage.t3"),
 	]
 	match kind:
 		"large":
-			t.push_front("A 확인선은 앞바퀴로 꼭 밟고, B 확인선까지 3분 30초 안에 들어오는 게 목표예요.")
-			t.append("트랙터와 트레일러가 예각(직각보다 더)으로 꺾이면 바로 실격이에요.")
+			t.push_front(Lang.t("tow.c.garage.large1"))
+			t.append(Lang.t("tow.c.garage.large2"))
 		"wrecker":
-			t = ["구난차만 단독으로 하는 코스예요. 차고 안 확인선을 뒷바퀴로 밟고 나오세요.",
-				"차체가 길어서 회전 반경이 커요. 차고 입구를 지나 충분히 올라간 뒤 후진하세요."]
+			t = [Lang.t("tow.c.garage.wrecker1"),
+				Lang.t("tow.c.garage.wrecker2")]
 	return t
 
 
 # ---------------------------------------------------------------- coupling
 
 const COUPLE_STEPS := {
-	"large": ["트랙터를 트레일러 앞에 일직선으로 맞추기", "후진해 킹핀 결합 (철컥)", "살짝 당겨 결합 확인", "에어호스·전기선 연결", "랜딩기어 올리기"],
-	"wrecker": ["언더리프트 내리기", "바퀴 받침(포크)을 앞바퀴에 맞추기", "바퀴 고정 스트랩 걸기", "안전 체인 연결", "언더리프트 들어 올리기"],
+	"large": ["tow.c.cp.large1", "tow.c.cp.large2", "tow.c.cp.large3", "tow.c.cp.large4", "tow.c.cp.large5"],
+	"wrecker": ["tow.c.cp.w1", "tow.c.cp.w2", "tow.c.cp.w3", "tow.c.cp.w4", "tow.c.cp.w5"],
 }
 const UNCOUPLE_STEPS := {
-	"large": ["주차 브레이크 채우기", "랜딩기어 내리기", "에어호스·전기선 분리", "킹핀 해제 레버 당기기", "천천히 전진해 빠져나오기"],
-	"wrecker": ["주차 브레이크 채우기", "언더리프트 내리기", "안전 체인 풀기", "바퀴 고정 스트랩 풀기", "언더리프트 올리고 전진"],
+	"large": ["tow.c.un.park", "tow.c.un.large2", "tow.c.un.large3", "tow.c.un.large4", "tow.c.un.large5"],
+	"wrecker": ["tow.c.un.park", "tow.c.cp.w1", "tow.c.un.w3", "tow.c.un.w4", "tow.c.un.w5"],
 }
+
+
+## Checklist keys (Lang) to text in the current language.
+static func _tr_all(keys: Array) -> Array:
+	return keys.map(func(k): return Lang.t(k))
 
 
 static func couple(kind: String, o: Vector2) -> Dictionary:
@@ -365,18 +370,18 @@ static func couple(kind: String, o: Vector2) -> Dictionary:
 	var hitch_y := 0.0
 	var tractor_axle_y: float = hitch_y + spec.c + start_gap
 	var step := {
-		"id": "couple", "type": "couple", "title": "연결" if kind == "large" else "피견인차 연결", "kind": kind,
+		"id": "couple", "type": "couple", "title": Lang.t("tow.c.couple_large") if kind == "large" else Lang.t("tow.c.couple"), "kind": kind,
 		"time_limit": 300.0,
 		"lines": [],
 		"paint": [PackedVector2Array([Vector2(-3.5, -t.back - 2.0), Vector2(-3.5, 18.0)]), PackedVector2Array([Vector2(3.5, -t.back - 2.0), Vector2(3.5, 18.0)])],
 		"trailer_pose": {"pos": Vector2(0, hitch_y), "th": PI / 2},
 		"start": {"pos": Vector2(0.55, tractor_axle_y), "th": PI / 2 + deg_to_rad(5.0)},
-		"checklist": COUPLE_STEPS[kind].slice(2) if kind == "large" else COUPLE_STEPS[kind],
+		"checklist": _tr_all(COUPLE_STEPS[kind]).slice(2) if kind == "large" else _tr_all(COUPLE_STEPS[kind]),
 		"demo": [{"dir": -1, "path": PackedVector2Array([Vector2(0, 30.0), Vector2(0, hitch_y + spec.c), Vector2(0, -20.0)]), "until": "coupled"}],
 		"asphalt": [Rect2(Vector2(-6, -t.back - 4.0), Vector2(12, t.back + 26.0))],
-		"tips": ["후진하면서 차 뒤를 트레일러(피견인차) 앞과 일직선으로 맞추세요." if kind == "large" else "구난차 뒤를 피견인차 앞범퍼 정중앙에 맞춰 천천히 후진하세요.",
-			"거의 닿으면 아주 천천히. 너무 세게 밀면 충돌로 실격이에요.",
-			"맞춰지면 순서대로 연결 작업을 고르세요. 순서가 틀리면 감점이에요."],
+		"tips": [Lang.t("tow.c.couple.t1_large") if kind == "large" else Lang.t("tow.c.couple.t1"),
+			Lang.t("tow.c.couple.t2"),
+			Lang.t("tow.c.couple.t3")],
 	}
 	return _place(step, o)
 
@@ -387,15 +392,15 @@ static func uncouple(kind: String, o: Vector2) -> Dictionary:
 	var zone := PackedVector2Array([Vector2(-2.6, 2.0), Vector2(2.6, 2.0), Vector2(2.6, 2.0 + zone_len), Vector2(-2.6, 2.0 + zone_len)])
 	var lead := _rig_len(kind) + 2.0
 	var step := {
-		"id": "uncouple", "type": "uncouple", "title": "분리" if kind == "large" else "피견인차 분리", "kind": kind,
+		"id": "uncouple", "type": "uncouple", "title": Lang.t("tow.c.uncouple_large") if kind == "large" else Lang.t("tow.c.uncouple"), "kind": kind,
 		"time_limit": 300.0,
 		"lines": [],
 		"paint": [zone + PackedVector2Array([zone[0]])],
 		"zone": zone,
 		"start": {"pos": Vector2(0, -lead + spec.c + spec.trailer.back - 2.0), "th": PI / 2},
-		"checklist": UNCOUPLE_STEPS[kind],
+		"checklist": _tr_all(UNCOUPLE_STEPS[kind]),
 		"demo": [{"dir": 1, "path": PackedVector2Array([Vector2(0, -40), Vector2(0, 80)]), "until": "zone"}],
 		"asphalt": [Rect2(Vector2(-6, -lead - 14.0), Vector2(12, lead + zone_len + 30.0))],
-		"tips": ["주차 구역 안에 트레일러까지 다 들어오게 세우세요.", "분리는 순서가 중요해요. 랜딩기어를 내리기 전에 킹핀을 풀면 안 돼요." if kind == "large" else "언더리프트를 내린 뒤에 고정 장치를 풀어야 해요."],
+		"tips": [Lang.t("tow.c.uncouple.t1"), Lang.t("tow.c.uncouple.t2_large") if kind == "large" else Lang.t("tow.c.uncouple.t2")],
 	}
 	return _place(step, o)

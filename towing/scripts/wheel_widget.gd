@@ -46,8 +46,8 @@ func _ang(p: Vector2) -> float:
 func turns_text() -> String:
 	var t := absf(angle) / 360.0
 	if t < 0.05:
-		return "핸들 중앙"
-	return "%s %.1f바퀴" % ["왼쪽" if angle < 0 else "오른쪽", t]
+		return Lang.t("tow.wheel.center")
+	return Lang.t("tow.wheel.turns") % [Lang.t("tow.wheel.left") if angle < 0 else Lang.t("tow.wheel.right"), t]
 
 
 func _draw() -> void:

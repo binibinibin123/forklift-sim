@@ -7,14 +7,22 @@ extends Node3D
 ## Command-line user args (after --) for screenshot and check runs:
 ##   kind=small|wrecker|large  step=<id> (practice/drill) or exam   demo
 ##   cam=chase|top|driver  t=<s> fast-forward the demo before showing
-##   screen=home|drive|result|replay|unlock|lessons  tab=<home tab>
-##   locked   simulate the free version      notch  simulate iPhone insets
+##   screen=home|drive|result|replay|unlock|lessons|rulebook  tab=<home tab>
+##   rule=<TowRules id> start that rule's drill   go  press 출발 at once
+##   autodrive  press 출발 and hold the gas, wheel straight   nofreeze  no freeze frames
+##   lang=ko|en (read by Lang)   locked   simulate the free version   notch  simulate iPhone insets
+##   All of these are read only in debug builds (the CI screenshot runs).
 ##   handoff  after the fast-forward the demo stops and you drive (checks)
 ##   icon     no UI, a fixed close-up camera (renders the app icon)
 ##   shot=<png> time=<s>  save a screenshot after <s> seconds and quit
 
 const KINDS := ["small", "wrecker", "large"]
-const CAM_NAME := {"chase": "뒤에서", "top": "위에서", "driver": "운전석"}
+## Run arguments; empty in release builds.
+static func run_args() -> PackedStringArray:
+	return OS.get_cmdline_user_args() if OS.is_debug_build() else PackedStringArray()
+
+
+static var reopen_tab := ""   # home tab to show again after a language reload
 const FREE := {"small": ["crank", "curve", "straight_back"]}
 const SIM_DT := 1.0 / 60.0
 const VERSION := "1.0"
@@ -64,6 +72,12 @@ var force_locked := false
 var sim_acc := 0.0
 var icon_mode := false
 var handoff := false
+var autodrive := false
+var no_freeze := false
+var freeze_on := false
+var freeze_v := {}
+var freeze_rig: Rig            # the live pose kept while scrubbing
+var pending_freeze := {}
 
 # test-facing shortcuts (tests/test_controls.gd)
 var wheel: WheelWidget:
@@ -84,9 +98,14 @@ func _ready() -> void:
 	var start_kind := ""
 	var start_step := ""
 	var start_screen := "home"
-	var start_tab := "courses"
+	var start_tab := "exam"
 	var start_demo := false
-	for a in OS.get_cmdline_user_args():
+	var start_rule := ""
+	var start_go := false
+	if reopen_tab != "":
+		start_tab = reopen_tab
+		reopen_tab = ""
+	for a in run_args():
 		var kv := a.split("=", true, 1)
 		var val := kv[1] if kv.size() > 1 else ""
 		match kv[0]:
@@ -103,6 +122,10 @@ func _ready() -> void:
 			"noguide": guide_on = false
 			"icon": icon_mode = true
 			"handoff": handoff = true
+			"rule": start_rule = val
+			"autodrive": autodrive = true
+			"nofreeze": no_freeze = true
+			"go": start_go = true
 	Kit.setup()
 	font = Kit.font
 	purchases = Purchases.new()
@@ -110,8 +133,8 @@ func _ready() -> void:
 	purchases.setup(store, force_locked)
 	purchases.changed.connect(_on_unlock_changed)
 	purchases.price_known.connect(func(_p): home.refresh())
-	purchases.failed.connect(func(r): _unlock_note("구매가 완료되지 않았어요. " + r, Kit.RED))
-	purchases.busy_changed.connect(func(b): if b: _unlock_note("App Store에 연결 중…", Kit.MUTED))
+	purchases.failed.connect(func(r): _unlock_note(Lang.t("tow.buy.failed") + r, Kit.RED))
+	purchases.busy_changed.connect(func(b): if b: _unlock_note(Lang.t("tow.buy.busy"), Kit.MUTED))
 	sfx = TowSfx.new()
 	add_child(sfx)
 	sfx.set_enabled(bool(store.setting("sound", true)))
@@ -125,7 +148,12 @@ func _ready() -> void:
 	cam.far = 600
 	add_child(cam)
 	_build_ui()
-	if start_kind != "":
+	if start_rule != "":
+		_show_home()
+		start_rule_drill(start_rule, start_kind if start_kind != "" else "small")
+		if autodrive or start_go:
+			_start_step()
+	elif start_kind != "":
 		var id := "exam" if start_step == "" else start_step
 		_start_run(start_kind, id, start_demo)
 		if ff_time > 0.0:
@@ -151,6 +179,7 @@ func _ready() -> void:
 		match start_screen:
 			"unlock": _open_unlock()
 			"lessons": _show("lessons")
+			"rulebook": home.select_tab("rulebook")
 			"onboarding": _show_onboarding()
 			_:
 				if not bool(store.data.get("onboarded", false)) and shot_path == "":
@@ -158,17 +187,23 @@ func _ready() -> void:
 
 
 func unlocked() -> bool:
-	return purchases.unlocked
+	return purchases.unlocked or not ExamUnlock.paywall_on()
 
 
 func is_free(kind: String, id: String) -> bool:
+	if not ExamUnlock.paywall_on():
+		return true
 	return FREE.has(kind) and id in FREE[kind]
+
+
+func _cam_name() -> String:
+	return Lang.t("tow.cam." + cam_mode)
 
 
 # ---------------------------------------------------------------- runs
 
 func _go(kind: String, id: String, as_demo: bool) -> void:
-	if not purchases.unlocked and not is_free(kind, id):
+	if not unlocked() and not is_free(kind, id):
 		_open_unlock()
 		return
 	_start_run(kind, id, as_demo)
@@ -182,11 +217,15 @@ func _start_run(kind: String, id: String, as_demo: bool) -> void:
 	exam.checklist_ready.connect(_on_checklist)
 	exam.finished.connect(_on_finished)
 	exam.step_started.connect(_on_step_started)
+	exam.violation.connect(_on_violation)
 	world.build(exam.steps)
 	view.setup(exam.rig)
 	pilot = TowAutopilot.new(exam) if demo else null
 	replay.clear()
 	last_why = []
+	pending_freeze = {}
+	freeze_on = false
+	hud.hide_freeze()
 	hud.hide_replay()
 	hud.set_controls_visible(true)
 	hud.set_paused(false)
@@ -218,6 +257,10 @@ func _start_step() -> void:
 	if exam.step.type == "couple" and pilot == null:
 		hud.set_gear(true)
 	sfx.play("ui_confirm", -8.0)
+	if exam.index == 0 and not exam.practice:
+		# exam day: the examiner's whistle starts the 20 s start window
+		sfx.play("whistle", -6.0)
+		_haptic(60)
 
 
 func _fast_forward(seconds: float) -> void:
@@ -268,7 +311,12 @@ func _process(dt: float) -> void:
 			coach.tick(SIM_DT)
 			coach.watch(exam)
 			replay.sample(exam, SIM_DT)
+			if not pending_freeze.is_empty():
+				break
 		braking = exam.rig.brake > 0.5
+		if not pending_freeze.is_empty():
+			_open_freeze(pending_freeze)
+			pending_freeze = {}
 	var r := exam.rig
 	var running := not paused and not exam.done
 	sfx.engine(running, clampf(r.speed_kmh() / 22.0 + r.throttle * 0.35, 0.0, 1.0))
@@ -296,7 +344,7 @@ func _read_controls() -> void:
 	rig.steer = hud.wheel.steer()
 	var kgas := Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W)
 	var kbrk := Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_SPACE)
-	rig.throttle = 0.55 if (hud.gas.held or kgas) else 0.0
+	rig.throttle = 0.55 if (hud.gas.held or kgas or autodrive) else 0.0
 	rig.brake = 1.0 if (hud.brk.held or kbrk) else 0.0
 	rig.reverse = hud.gear.label == "R"
 
@@ -311,6 +359,17 @@ func _unhandled_key_input(e: InputEvent) -> void:
 			_cycle_cam()
 		elif e.keycode == KEY_ESCAPE:
 			_toggle_pause()
+		elif e.keycode == KEY_B:
+			_toggle_belt()
+
+
+func _toggle_belt() -> void:
+	if pilot or exam == null or exam.done or freeze_on:
+		return
+	exam.seatbelt = not exam.seatbelt
+	hud.set_belt(exam.seatbelt)
+	sfx.play("clunk" if exam.seatbelt else "ui_tap", -8.0)
+	_haptic(15)
 
 
 func _toggle_gear() -> void:
@@ -393,6 +452,17 @@ func _snap_camera() -> void:
 func _camera(dt: float) -> void:
 	var r := exam.rig
 	var k := clampf(dt * 3.0, 0.0, 1.0)
+	if freeze_on:
+		# straight down over the measurement so the line reads true
+		var a: Vector2 = freeze_v.get("a", r.pos)
+		var b: Vector2 = freeze_v.get("b", r.pos)
+		var m := (a + b) * 0.5
+		var hh: float = {"small": 13.0, "wrecker": 15.0, "large": 22.0}[r.kind]
+		cam.global_position = Vector3(m.x, hh, -m.y)
+		cam.look_at(Vector3(m.x, 0, -m.y), Vector3(0, 0, -1))
+		cam.fov = 55
+		cam.cull_mask = 0xFFFFF & ~4
+		return
 	if icon_mode:
 		var c := _rig_center()
 		cam.global_position = Vector3(c.x - 3.0, 15.0, -c.y + 9.0)
@@ -590,7 +660,7 @@ func _replay_process(dt: float) -> void:
 	_camera(dt)
 	_mirrors()
 	world.draw_guide([])
-	hud.update(exam, false, CAM_NAME.get(cam_mode, ""), guide_on, false)
+	hud.update(exam, false, _cam_name(), guide_on, false)
 	hud.minimap.queue_redraw()
 
 
@@ -627,6 +697,8 @@ func _build_ui() -> void:
 	home.free_check = is_free
 	home.version = VERSION
 	home.run_requested.connect(_go)
+	home.rule_drill_requested.connect(func(id, k): sfx.play("ui_tap", -8.0); start_rule_drill(id, k))
+	home.language_changed.connect(_on_language)
 	home.unlock_requested.connect(_open_unlock)
 	home.restore_requested.connect(func(): sfx.play("ui_tap", -8.0); purchases.restore())
 	home.forklift_requested.connect(func(): get_tree().change_scene_to_file("res://main.tscn"))
@@ -648,6 +720,11 @@ func _build_ui() -> void:
 	hud.replay_seek.connect(func(t): replay_playing = false; _seek_replay(t))
 	hud.replay_play.connect(func(on): replay_playing = on; if on and replay_t >= replay.duration: _seek_replay(0.0))
 	hud.replay_close.connect(_leave_replay)
+	hud.seatbelt_pressed.connect(_toggle_belt)
+	hud.freeze_scrub.connect(_freeze_scrub)
+	hud.freeze_continue.connect(_close_freeze)
+	hud.freeze_result.connect(func(): _close_freeze(); _show("result"))
+	hud.project = func(p: Vector2) -> Vector2: return cam.unproject_position(Vector3(p.x, 0.05, -p.y))
 	hud.minimap_on = bool(store.setting("minimap", true))
 	root.add_child(hud)   # _ready builds the widgets
 	hud.set_lefty(bool(store.setting("lefty", false)))
@@ -684,7 +761,7 @@ func _safe_margins() -> Vector4:
 		l = sa.position.x * k
 		r = (ws.x - sa.end.x) * k
 		b = (ws.y - sa.end.y) * k
-	if "notch" in OS.get_cmdline_user_args():
+	if "notch" in run_args():
 		l = 118.0
 		r = 118.0
 		b = 42.0
@@ -773,7 +850,7 @@ func _toggle_guide() -> void:
 
 
 func _toggle_pause() -> void:
-	if exam == null or exam.done or hud.tips_panel.visible:
+	if exam == null or exam.done or hud.tips_panel.visible or freeze_on:
 		return
 	paused = not paused
 	_release_all()
@@ -786,33 +863,181 @@ func _toggle_pause() -> void:
 func _update_hud(braking := false) -> void:
 	if exam == null:
 		return
-	hud.update(exam, pilot == null, CAM_NAME.get(cam_mode, ""), guide_on, braking)
+	hud.update(exam, pilot == null, _cam_name(), guide_on, braking)
 
 
 func _on_message(t: String, kind: String) -> void:
 	hud.show_toast(t, kind)
-	if kind == "bad":
-		var pts := 0
-		var m := RegEx.create_from_string("-(\\d+)$").search(t)
-		if m:
-			pts = int(m.get_string(1))
-		replay.mark(exam, t.split("  -")[0], pts)
-		last_why.append(t.split("  -")[0].replace("실격: ", ""))
-		if t.begins_with("실격"):
-			sfx.play("disqualify", -4.0)
-			_haptic(120)
-		else:
-			sfx.play("line_touch", -4.0)
-			sfx.play("tyre_scrub", -10.0)
-			_haptic(60)
-	elif kind == "good":
+	if kind == "good":
 		sfx.play("step_done", -6.0)
 		_haptic(25)
 
 
+## A deduction or disqualification: mark the replay, sound it, and (when a
+## person is driving) freeze the run on it once this simulation tick ends.
+func _on_violation(v: Dictionary) -> void:
+	replay.mark(exam, str(v.text), int(v.points))
+	last_why.append(str(v.text))
+	if bool(v.dq):
+		sfx.play("disqualify", -4.0)
+		_haptic(120)
+	else:
+		sfx.play("line_touch", -4.0)
+		sfx.play("tyre_scrub", -10.0)
+		_haptic(60)
+	if not demo and pilot == null and not no_freeze:
+		pending_freeze = v
+
+
+# ---------------------------------------------------------------- freeze frame
+
+func _open_freeze(v: Dictionary) -> void:
+	freeze_on = true
+	freeze_v = v
+	paused = true
+	_release_all()
+	coach.stop()
+	freeze_rig = exam.rig.copy()
+	var t1 := float(v.t)
+	hud.hide_checklist()
+	hud.show_freeze(v, maxf(t1 - 8.0, 0.0), t1, exam.done)
+	sfx.engine(false, 0.0)
+	sfx.beep_reverse(false)
+
+
+func _freeze_scrub(t: float) -> void:
+	var f := replay.frame_at(t)
+	if f.is_empty():
+		return
+	Replay.apply(f, exam.rig)
+	view.sync(bool(f.parked), f.ppos, f.pth)
+	hud.wheel.set_steer(exam.rig.steer)
+	hud.freeze_tick(t)
+
+
+func _close_freeze() -> void:
+	if not freeze_on:
+		return
+	freeze_on = false
+	hud.hide_freeze()
+	if freeze_rig:
+		var r := exam.rig
+		r.pos = freeze_rig.pos
+		r.th = freeze_rig.th
+		r.phi = freeze_rig.phi
+		r.v = 0.0
+		r.steer = freeze_rig.steer
+		r.reverse = freeze_rig.reverse
+		r.coupled = freeze_rig.coupled
+		hud.wheel.set_steer(r.steer)
+	view.sync(exam.trailer_parked, exam.trailer_pos, exam.trailer_th)
+	hud.set_controls_visible(true)
+	_snap_camera()
+	if not exam.done:
+		paused = false
+		if exam.aligned and exam.checklist.size() > exam.check_next:
+			hud.show_checklist(exam.checklist, hash(run_key) + exam.index, pilot != null, font)
+
+
+# ---------------------------------------------------------------- rule drills
+
+## Starts a run that puts the driver just before the violation a rulebook
+## row describes (see TowRules.ROWS).
+func start_rule_drill(rule_id: String, kind: String) -> void:
+	var k := kind
+	var r := TowRules.row(rule_id)
+	if r.is_empty():
+		return
+	if not r.pts.has(k):
+		k = "large" if r.pts.has("large") else "wrecker"
+	var tip := Lang.t("tow.rd." + rule_id)
+	match rule_id:
+		"start_late":
+			_start_run(k, "exam", false)
+			exam.t_wait = 12.0
+		"seatbelt":
+			_start_run(k, "crank" if k != "large" else "garage", false)
+		"line":
+			var id := "crank" if k != "large" else "garage"
+			_start_run(k, id, false)
+			exam.seatbelt = true
+			_handoff_before(func(e: Exam): return absf(wrapf(e.rig.th - PI / 2, -PI, PI)) > 0.35, 1.2)
+		"time":
+			_start_run(k, "crank" if k != "large" else "garage", false)
+			exam.seatbelt = true
+			exam.t_step = exam.limit - 8.0
+		"confirm":
+			_start_run("large", "garage", false)
+			exam.seatbelt = true
+			_handoff_before(func(e: Exam): return e.touched.has("A"), 2.5)
+		"jackknife":
+			_start_run(k, "garage", false)
+			exam.seatbelt = true
+			_handoff_before(func(e: Exam): return e.rig.reverse and e.rig.v < -0.4, 0.0)
+			exam.rig.phi = exam.rig.th - deg_to_rad(62.0)
+			hud.set_gear(true)
+		"order":
+			_start_run(k, "couple", false)
+			exam.seatbelt = true
+			_handoff_before(func(e: Exam): return e.aligned, 0.0)
+		"collide":
+			_start_run(k, "couple", false)
+			exam.seatbelt = true
+			_handoff_before(func(e: Exam): return e.couple_error().along < 2.0, 0.0)
+			hud.set_gear(true)
+		"off_course":
+			_start_run(k, "crank" if k != "large" else "garage", false)
+			exam.seatbelt = true
+			_handoff_before(func(e: Exam): return absf(wrapf(e.rig.th - PI / 2, -PI, PI)) > 0.35, 1.2)
+	hud.show_tips(exam, false)
+	hud.tips_coach.text = tip
+	hud.set_belt(exam.seatbelt)
+
+
+## Plays the model drive in a scratch exam until `pred` holds, then replays it
+## into the live run up to `back` seconds earlier and hands over the wheel.
+func _handoff_before(pred: Callable, back: float) -> void:
+	var probe := Exam.new(exam.kind, "" if not exam.practice else exam.step.id)
+	var ap := TowAutopilot.new(probe)
+	probe.start()
+	var t := 0.0
+	while not probe.done and t < 600.0 and not pred.call(probe):
+		ap.update(SIM_DT)
+		probe.update(SIM_DT)
+		t += SIM_DT
+	var target := maxf(t - back, 0.0)
+	var seat := exam.seatbelt
+	var live := TowAutopilot.new(exam)
+	exam.seatbelt = true
+	var s := 0.0
+	while s < target and not exam.done:
+		live.update(SIM_DT)
+		exam.update(SIM_DT)
+		replay.sample(exam, SIM_DT)
+		s += SIM_DT
+	exam.seatbelt = seat
+	exam.t_step = 0.0   # the clock starts when the driver takes over
+	exam.rig.throttle = 0.0
+	exam.rig.brake = 0.0
+	exam.rig.v = 0.0
+	if exam.aligned and not exam.checklist.is_empty():
+		_on_checklist(exam.checklist)
+	view.sync(exam.trailer_parked, exam.trailer_pos, exam.trailer_th)
+	hud.wheel.set_steer(exam.rig.steer)
+	hud.set_gear(exam.rig.reverse)
+	_snap_camera()
+
+
+func _on_language(code: String) -> void:
+	Lang.set_code(code)
+	reopen_tab = "settings"
+	coach.stop()
+	get_tree().reload_current_scene()
+
+
 func _on_checklist(items: Array) -> void:
 	hud.show_checklist(items, hash(run_key) + exam.index, pilot != null, font)
-	coach.say("checklist", "순서대로 작업하세요", 1.0)
+	coach.say("checklist", Lang.t("tow.coach.checklist"), 1.0)
 
 
 func _on_check(item: String) -> void:
@@ -882,15 +1107,15 @@ func _on_finished(ok: bool) -> void:
 	sfx.play("pass" if ok else "fail", -4.0)
 	_haptic(80 if ok else 150)
 	if ok:
-		coach.say("done", "합격이에요. 수고했어요", 0.0, "good")
+		coach.say("done", Lang.t("tow.coach.pass"), 0.0, "good")
 	elif exam.disqualified != "":
-		coach.say("done", "실격이에요. 리플레이로 그 순간을 다시 보세요", 0.0, "bad")
+		coach.say("done", Lang.t("tow.coach.dq"), 0.0, "bad")
 	else:
-		coach.say("done", "아쉽게 불합격이에요. 감점 내역을 확인하세요", 0.0, "bad")
+		coach.say("done", Lang.t("tow.coach.fail"), 0.0, "bad")
 	result.show_result(exam, rec, new_badges, _next_id() != "", demo)
 	result.visible = false
 	get_tree().create_timer(1.2).timeout.connect(func():
-		if exam and exam.done and screen == "drive":
+		if exam and exam.done and screen == "drive" and not freeze_on and pending_freeze.is_empty():
 			_show("result"))
 
 
@@ -911,23 +1136,26 @@ func _build_unlock() -> void:
 	var v := Kit.vbox(12)
 	v.custom_minimum_size = Vector2(640, 0)
 	unlock_panel.add_child(v)
-	v.add_child(Kit.label("전체 해제", 38, Kit.GOLD))
-	v.add_child(Kit.wrap("· 소형견인·구난·대형견인 모의시험 전부\n· 모든 코스 연습과 모범 주행\n· 90도 후진·S자 후진·자유 연습장\n· 연결·분리 작업 연습\n· 지게차 실기 전체 코스와 모의시험도 함께\n한 번 구매로 계속 쓸 수 있어요. 광고는 없어요.", 22, Kit.TEXT, 640))
+	v.add_child(Kit.label(Lang.t("tow.buy.unlock"), 38, Kit.GOLD))
+	v.add_child(Kit.wrap(Lang.t("tow.buy.body"), 22, Kit.TEXT, 640))
 	unlock_msg = Kit.label("", 17, Kit.MUTED)
 	v.add_child(unlock_msg)
 	var h := Kit.hbox(12)
 	v.add_child(h)
-	var buy := Kit.button("구매하기", func(): purchases.buy(), 26, "gold")
+	var buy := Kit.button(Lang.t("tow.buy.buy"), func(): purchases.buy(), 26, "gold")
 	h.add_child(buy)
-	h.add_child(Kit.button("구매 복원", func(): purchases.restore(), 22, "ghost"))
+	h.add_child(Kit.button(Lang.t("tow.buy.restore"), func(): purchases.restore(), 22, "ghost"))
 	h.add_child(Kit.spacer())
-	h.add_child(Kit.button("닫기", func(): unlock_panel.visible = false; unlock_dim.visible = false, 22, "ghost"))
-	purchases.price_known.connect(func(p): buy.text = "구매하기  " + p)
+	h.add_child(Kit.button(Lang.t("tow.ui.close"), func(): unlock_panel.visible = false; unlock_dim.visible = false, 22, "ghost"))
+	purchases.price_known.connect(func(p): buy.text = Lang.t("tow.buy.buy") + "  " + p)
 	unlock_panel.visible = false
 
 
 func _open_unlock() -> void:
+	if not ExamUnlock.paywall_on():
+		return   # 1.0 ships with everything open: no purchase screen
 	unlock_msg.text = ""
+
 	unlock_panel.visible = true
 	unlock_dim.visible = true
 	sfx.play("ui_tap", -8.0)

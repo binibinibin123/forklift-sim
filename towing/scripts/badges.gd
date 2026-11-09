@@ -3,18 +3,18 @@ extends RefCounted
 ## Achievements earned from the save data. Checked after every finished run.
 
 const ALL := [
-	{"id": "first_run", "title": "첫 주행", "desc": "코스를 한 번 끝까지 달렸어요", "icon": "🚚"},
-	{"id": "first_pass", "title": "첫 합격", "desc": "모의시험에 처음 합격했어요", "icon": "✅"},
-	{"id": "perfect", "title": "무감점", "desc": "감점 없이 100점으로 통과", "icon": "💯"},
-	{"id": "small_pass", "title": "소형견인", "desc": "소형견인 모의시험 합격", "icon": "🚐"},
-	{"id": "wrecker_pass", "title": "구난", "desc": "구난 모의시험 합격", "icon": "🔧"},
-	{"id": "large_pass", "title": "대형견인", "desc": "대형견인 모의시험 합격", "icon": "🚛"},
-	{"id": "triple", "title": "1종 특수 마스터", "desc": "세 면허 모의시험을 모두 합격", "icon": "🏆"},
-	{"id": "drills", "title": "훈련장 졸업", "desc": "후진 훈련 3종을 모두 통과", "icon": "🎓"},
-	{"id": "ten_runs", "title": "연습벌레", "desc": "10번 주행", "icon": "🔟"},
-	{"id": "fifty_runs", "title": "베테랑", "desc": "50번 주행", "icon": "🎖"},
-	{"id": "hour", "title": "한 시간", "desc": "총 1시간 연습", "icon": "⏱"},
-	{"id": "no_jackknife", "title": "꺾이지 않는", "desc": "대형견인 방향전환을 감점 없이 통과", "icon": "📐"},
+	{"id": "first_run", "title": "tow.badge.first_run", "desc": "tow.badge.first_run.d", "icon": "🚚"},
+	{"id": "first_pass", "title": "tow.badge.first_pass", "desc": "tow.badge.first_pass.d", "icon": "✅"},
+	{"id": "perfect", "title": "tow.badge.perfect", "desc": "tow.badge.perfect.d", "icon": "💯"},
+	{"id": "small_pass", "title": "tow.badge.small_pass", "desc": "tow.badge.small_pass.d", "icon": "🚐"},
+	{"id": "wrecker_pass", "title": "tow.badge.wrecker_pass", "desc": "tow.badge.wrecker_pass.d", "icon": "🔧"},
+	{"id": "large_pass", "title": "tow.badge.large_pass", "desc": "tow.badge.large_pass.d", "icon": "🚛"},
+	{"id": "triple", "title": "tow.badge.triple", "desc": "tow.badge.triple.d", "icon": "🏆"},
+	{"id": "drills", "title": "tow.badge.drills", "desc": "tow.badge.drills.d", "icon": "🎓"},
+	{"id": "ten_runs", "title": "tow.badge.ten_runs", "desc": "tow.badge.ten_runs.d", "icon": "🔟"},
+	{"id": "fifty_runs", "title": "tow.badge.fifty_runs", "desc": "tow.badge.fifty_runs.d", "icon": "🎖"},
+	{"id": "hour", "title": "tow.badge.hour", "desc": "tow.badge.hour.d", "icon": "⏱"},
+	{"id": "no_jackknife", "title": "tow.badge.no_jackknife", "desc": "tow.badge.no_jackknife.d", "icon": "📐"},
 ]
 
 

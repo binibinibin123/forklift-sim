@@ -7,6 +7,10 @@ signal message(text: String, kind: String)   # kind: info / good / bad
 signal step_started(index: int)
 signal checklist_ready(options: Array)
 signal finished(passed: bool)
+## Every deduction or disqualification with what was measured at that moment:
+## {code, dq, points, text, measured, limit, unit, cmp, detail, t, step, a, b, kind}
+## a/b are ground points for the measurement line (equal when there is none).
+signal violation(v: Dictionary)
 
 const PASS := 90
 const START_GRACE := 20.0
@@ -19,8 +23,11 @@ var rig: Rig
 var index := 0
 var step: Dictionary
 var score := 100
-var deductions: Array = []      # [{text, points}]
+var deductions: Array = []      # violations (see `violation`): text, points, code, measured, limit...
 var disqualified := ""          # reason, empty when not
+var dq_info := {}               # the disqualifying violation (see `violation`)
+var seatbelt := false           # 좌석안전띠; the demo driver buckles up
+var confirm_min := {}           # confirm id -> {d, a, b}: closest approach so far
 var done := false
 var passed := false
 
@@ -71,6 +78,7 @@ func _begin_step() -> void:
 	limit = step.time_limit
 	overtime_count = 0
 	touched = {}
+	confirm_min = {}
 	touching = false
 	finished_step = false
 	aligned = false
@@ -119,13 +127,17 @@ func update(dt: float) -> void:
 	t_total += dt
 	if absf(rig.v) > 0.05:
 		moved = true
+		if not seatbelt and not step.get("free_run", false):
+			_disqualify(Lang.t("tow.ex.belt"), {"code": "seatbelt", "detail": Lang.t("tow.m.belt", [rig.speed_kmh()]), "a": rig.pos, "b": rig.pos})
+			return
 	if not moved and index == 0 and not practice:
 		t_wait += dt
 		if t_wait > START_GRACE:
-			_disqualify("20초 안에 출발하지 않았어요")
+			_disqualify(Lang.t("tow.ex.start_late"), {"code": "start_late", "measured": t_wait, "limit": START_GRACE, "unit": "s", "cmp": ">", "a": rig.pos, "b": rig.pos})
 			return
 	if rig.jackknifed:
-		_disqualify("트랙터와 트레일러가 예각으로 꺾였어요" if is_large() else "차와 트레일러가 너무 꺾였어요 (잭나이프)")
+		var deg := absf(rad_to_deg(rig.beta()))
+		_disqualify(Lang.t("tow.ex.jack_large") if is_large() else Lang.t("tow.ex.jack"), {"code": "jackknife", "measured": deg, "limit": rad_to_deg(Rig.JACKKNIFE), "unit": "deg", "cmp": ">", "a": rig.hitch(), "b": rig.trailer_axle()})
 		return
 	_check_time()
 	if done:
@@ -143,27 +155,40 @@ func _check_time() -> void:
 	if t_step <= limit:
 		return
 	overtime_count += 1
+	var info := {"code": "time", "measured": t_step, "limit": limit, "unit": "s", "cmp": ">", "a": rig.pos, "b": rig.pos}
 	if is_large():
-		_deduct(20, "%s 시간 초과" % step.title)
+		_deduct(20, Lang.t("tow.ex.time", [step.title]), info)
 		limit += 1e9
 	else:
-		_deduct(10, "%s 시간 초과" % step.title)
+		_deduct(10, Lang.t("tow.ex.time", [step.title]), info)
 		limit += 180.0
-		message.emit("3분이 더 주어져요", "info")
+		message.emit(Lang.t("tow.ex.more_time"), "info")
 
 
-func _deduct(points: int, text: String) -> void:
+## info: code, measured, limit, unit, cmp, detail, a, b (see `violation`)
+func _deduct(points: int, text: String, info := {}) -> void:
 	score -= points
-	deductions.append({"text": text, "points": points})
+	var v := _violation(false, points, text, info)
+	deductions.append(v)
 	message.emit("%s  -%d" % [text, points], "bad")
+	violation.emit(v)
 	if is_large() and points >= 20:
 		_end(false, "")
 
 
-func _disqualify(reason: String) -> void:
+func _disqualify(reason: String, info := {}) -> void:
 	disqualified = reason
-	message.emit("실격: " + reason, "bad")
+	dq_info = _violation(true, 0, reason, info)
+	message.emit(Lang.t("tow.ex.dq_prefix") + reason, "bad")
+	violation.emit(dq_info)
 	_end(false, reason)
+
+
+func _violation(dq: bool, points: int, text: String, info: Dictionary) -> Dictionary:
+	var v := {"code": "", "dq": dq, "points": points, "text": text, "measured": -1.0, "limit": -1.0, "unit": "", "cmp": "",
+		"detail": "", "t": t_total, "step": index, "a": rig.pos, "b": rig.pos, "kind": kind}
+	v.merge(info, true)
+	return v
 
 
 func _end(ok: bool, _reason: String) -> void:
@@ -180,7 +205,7 @@ func _next_step() -> void:
 	if index + 1 >= steps.size():
 		_end(true, "")
 		return
-	message.emit("%s 통과" % step.title, "good")
+	message.emit(Lang.t("tow.ex.step_pass", [step.title]), "good")
 	index += 1
 	_begin_step()
 
@@ -198,15 +223,18 @@ func _update_course(before: Vector2, before_wheels: Array) -> void:
 			break
 	if hit and not touching:
 		touching = true
+		var near := nearest_line(last_hit.p, step.lines)
+		var info := {"code": "line", "measured": float(near.d) * 100.0, "limit": Courses.LINE_HIT * 100.0, "unit": "cm", "cmp": "<", "a": last_hit.p, "b": near.q}
 		if is_large():
-			_deduct(20, "검지선 접촉")
+			_deduct(20, Lang.t("tow.ex.line"), info)
 			return
-		_deduct(10, "검지선 접촉 (탈선)")
+		_deduct(10, Lang.t("tow.ex.line_small"), info)
 	elif not hit:
 		touching = false
 	# off course: the rig strays far outside the lines
-	if _far_off(wheels):
-		_disqualify("코스를 벗어났어요")
+	var off := _off_wheel(wheels)
+	if not off.is_empty():
+		_disqualify(Lang.t("tow.ex.off"), {"code": "off_course", "measured": float(off.d) * 100.0, "limit": 0.0, "unit": "cm", "cmp": ">", "a": off.p, "b": off.q})
 		return
 	# confirm lines
 	for c in step.confirms:
@@ -215,9 +243,12 @@ func _update_course(before: Vector2, before_wheels: Array) -> void:
 		if c.id == "B" and step.confirms.size() > 1 and not touched.has("A"):
 			continue
 		for w in _wheels_for(wheels, c.who):
-			if _seg_dist(w.p, c.a, c.b) < Courses.LINE_HIT + 0.1:
+			var dd := _seg_dist(w.p, c.a, c.b)
+			if not confirm_min.has(c.id) or dd < float(confirm_min[c.id].d):
+				confirm_min[c.id] = {"d": dd, "a": w.p, "b": _seg_closest(w.p, c.a, c.b)}
+			if dd < Courses.LINE_HIT + 0.1:
 				touched[c.id] = true
-				message.emit("%s 접촉" % c.label, "good")
+				message.emit(Lang.t("tow.ex.confirm_ok", [c.label]), "good")
 				break
 	# finish
 	var f: Dictionary = step.finish
@@ -228,10 +259,12 @@ func _update_course(before: Vector2, before_wheels: Array) -> void:
 	if _crossed(p_before, p_now, f.a, f.b, f.dir):
 		for c in step.confirms:
 			if not touched.has(c.id):
+				var m: Dictionary = confirm_min.get(c.id, {"d": -1.0, "a": c.a, "b": c.b})
+				var info := {"code": "confirm", "measured": float(m.d) * 100.0, "limit": (Courses.LINE_HIT + 0.1) * 100.0, "unit": "cm", "cmp": ">", "a": m.a, "b": m.b}
 				if is_large():
-					_deduct(20, "%s 미접촉" % c.label)
+					_deduct(20, Lang.t("tow.ex.confirm_miss", [c.label]), info)
 				else:
-					_disqualify("%s을 밟지 않았어요 (과제 미이행)" % c.label)
+					_disqualify(Lang.t("tow.ex.confirm_dq", [c.label]), info)
 				return
 		_next_step()
 
@@ -244,16 +277,51 @@ func _near_lines(p: Vector2, lines: Array) -> bool:
 	return false
 
 
+## The closest point of any line to p: {d, q}.
+static func nearest_line(p: Vector2, lines: Array) -> Dictionary:
+	var best := {"d": INF, "q": p}
+	for l in lines:
+		for i in l.size() - 1:
+			var q := _seg_closest(p, l[i], l[i + 1])
+			var d := p.distance_to(q)
+			if d < float(best.d):
+				best = {"d": d, "q": q}
+	return best
+
+
+## The tyre closest to any line of the current course step (examiner panel): {d, p, q} or {}.
+func closest_wheel_to_line() -> Dictionary:
+	if step.get("type", "") != "course" or step.lines.is_empty():
+		return {}
+	var best := {}
+	for w in rig.wheels():
+		var n := nearest_line(w.p, step.lines)
+		if best.is_empty() or float(n.d) < float(best.d):
+			best = {"d": n.d, "p": w.p, "q": n.q}
+	return best
+
+
 func _far_off(wheels: Array) -> bool:
-	# a tyre more than 2.5 m past the nearest line, outside the paved area
+	return not _off_wheel(wheels).is_empty()
+
+
+## A tyre outside the paved area: {p, q, d} (q = nearest paved point), or {}.
+func _off_wheel(wheels: Array) -> Dictionary:
 	for w in wheels:
 		var inside := false
+		var best_q: Vector2 = w.p
+		var best_d := INF
 		for r in step.asphalt:
 			if r.has_point(w.p):
 				inside = true
+				break
+			var q := Vector2(clampf(w.p.x, r.position.x, r.end.x), clampf(w.p.y, r.position.y, r.end.y))
+			if w.p.distance_to(q) < best_d:
+				best_d = w.p.distance_to(q)
+				best_q = q
 		if not inside:
-			return true
-	return false
+			return {"p": w.p, "q": best_q, "d": best_d}
+	return {}
 
 
 func _wheels_for(wheels: Array, who: String) -> Array:
@@ -305,9 +373,13 @@ static func _crossed(p0: Vector2, p1: Vector2, a: Vector2, b: Vector2, dir: Vect
 
 
 static func _seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	return p.distance_to(_seg_closest(p, a, b))
+
+
+static func _seg_closest(p: Vector2, a: Vector2, b: Vector2) -> Vector2:
 	var ab := b - a
 	var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 1e-6), 0.0, 1.0)
-	return p.distance_to(a + ab * t)
+	return a + ab * t
 
 
 # ---------------------------------------------------------------- coupling
@@ -330,17 +402,17 @@ func _update_couple() -> void:
 		rig.v = 0.0
 		return
 	if e.along < -0.5:
-		_disqualify("피견인차와 충돌했어요")
+		_disqualify(Lang.t("tow.ex.collide"), {"code": "collide", "measured": -float(e.along) * 100.0, "limit": 50.0, "unit": "cm", "cmp": ">", "a": rig.hitch(), "b": trailer_pos})
 		return
 	# far past the sides counts as leaving the yard
 	if absf(e.side) > 4.0 and e.along < 6.0:
-		_disqualify("연결 구역을 벗어났어요")
+		_disqualify(Lang.t("tow.ex.yard_out"), {"code": "yard_out", "measured": absf(e.side) * 100.0, "limit": 400.0, "unit": "cm", "cmp": ">", "a": rig.hitch(), "b": trailer_pos})
 		return
 	if absf(e.along) < 0.3 and absf(e.side) < 0.35 and absf(e.angle) < 8.0 and absf(rig.v) < 0.25:
 		aligned = true
 		rig.v = 0.0
 		rig.throttle = 0.0
-		message.emit("위치가 맞았어요. 연결 순서를 고르세요", "good")
+		message.emit(Lang.t("tow.ex.aligned"), "good")
 		checklist_ready.emit(checklist)
 
 
@@ -355,8 +427,8 @@ func choose(item: String) -> bool:
 		return true
 	if not check_mistake:
 		check_mistake = true
-		_deduct(10, "%s 순서 미숙" % step.title)
-	message.emit("다음 순서: " + checklist[check_next], "info")
+		_deduct(10, Lang.t("tow.ex.order", [step.title]), {"code": "order", "detail": Lang.t("tow.m.order", [item, checklist[check_next]])})
+	message.emit(Lang.t("tow.ex.next_item") + checklist[check_next], "info")
 	return false
 
 
@@ -365,7 +437,7 @@ func _checklist_done() -> void:
 		trailer_parked = false
 		rig.couple(trailer_th)
 		aligned = false
-		message.emit("연결 완료", "good")
+		message.emit(Lang.t("tow.ex.coupled"), "good")
 		_next_step()
 	else:
 		trailer_parked = true
@@ -376,7 +448,7 @@ func _checklist_done() -> void:
 		aligned = false
 		pulled_away = true
 		rig.reverse = false
-		message.emit("분리 완료. 앞으로 빠져나오세요", "good")
+		message.emit(Lang.t("tow.ex.uncoupled"), "good")
 
 
 func _update_uncouple() -> void:
@@ -389,7 +461,8 @@ func _update_uncouple() -> void:
 		return
 	if absf(rig.v) < 0.05 and rig.throttle < 0.01 and _rig_in_zone():
 		aligned = true
-		message.emit("주차 구역에 섰어요. 분리 순서를 고르세요", "good")
+		message.emit(Lang.t("tow.ex.in_zone"), "good")
+
 		checklist_ready.emit(checklist)
 
 

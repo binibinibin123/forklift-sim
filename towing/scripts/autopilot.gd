@@ -16,6 +16,7 @@ var choose_t := 0.0
 
 func _init(e: Exam) -> void:
 	exam = e
+	e.seatbelt = true
 	e.step_started.connect(func(_i): _reset())
 	_reset()
 

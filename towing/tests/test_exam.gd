@@ -77,6 +77,7 @@ func _rules() -> void:
 	# driving straight into the crank's first bend touches a line
 	var e2 := Exam.new("small", "crank")
 	e2.start()
+	e2.seatbelt = true
 	e2.rig.throttle = 0.6
 	for i in 60 * 30:
 		e2.update(1.0 / 60.0)
@@ -86,6 +87,7 @@ func _rules() -> void:
 	# large: any line touch is an immediate fail
 	var e3 := Exam.new("large", "garage")
 	e3.start()
+	e3.seatbelt = true
 	e3.rig.throttle = 0.8
 	e3.rig.steer = 1.0
 	for i in 60 * 40:

@@ -101,6 +101,9 @@ func beep_reverse(on: bool) -> void:
 func stream(name: String) -> AudioStream:
 	if _streams.has(name):
 		return _streams[name]
+	if name == "whistle":
+		_streams[name] = _whistle()
+		return _streams[name]
 	var path := DIR + name + ".wav"
 	var s: AudioStream = null
 	if ResourceLoader.exists(path):
@@ -140,3 +143,30 @@ func _voice() -> AudioStreamPlayer:
 	_pool.append(p)
 	p.stop()
 	return p
+
+
+## The examiner's start whistle, made in code (two short trilled blasts).
+static func _whistle() -> AudioStreamWAV:
+	var rate := 22050
+	var n := int(rate * 0.9)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / rate
+		var on := (t < 0.32) or (t > 0.42 and t < 0.86)
+		var env := 0.0
+		if on:
+			var t0 := t if t < 0.32 else t - 0.42
+			var t1 := 0.32 if t < 0.32 else 0.44
+			env = clampf(t0 / 0.02, 0.0, 1.0) * clampf((t1 - t0) / 0.04, 0.0, 1.0)
+		var f := 2900.0 + 180.0 * sin(TAU * 32.0 * t)   # pea-whistle trill
+		ph += TAU * f / rate
+		var v := sin(ph) * 0.55 + sin(ph * 2.0) * 0.12
+		data.encode_s16(i * 2, int(clampf(v * env, -1.0, 1.0) * 26000.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = rate
+	w.stereo = false
+	w.data = data
+	return w

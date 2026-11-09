@@ -10,19 +10,19 @@ extends RefCounted
 
 const SPECS := {
 	"small": {   # 1-ton truck + small trailer over 750 kg (소형견인)
-		"name": "1톤 화물차 + 소형 트레일러",
+		"name": "tow.spec.small",
 		"L": 2.64, "width": 1.74, "front_oh": 1.2, "rear_oh": 1.3, "track": 1.48,
 		"c": 1.45, "max_steer": 36.0, "rear_tandem": 0.0, "cab_len": 1.9, "color": Color(0.16, 0.38, 0.78),
 		"trailer": {"D": 3.3, "width": 2.0, "front": 1.0, "back": 5.1, "track": 1.72, "tandem": 0.0, "lifted_front": false, "kind": "caravan"},
 	},
 	"wrecker": {   # 5-ton wrecker lifting a 1-ton truck by its front wheels (구난)
-		"name": "5톤 구난차 + 1톤 화물차",
+		"name": "tow.spec.wrecker",
 		"L": 4.0, "width": 2.3, "front_oh": 1.35, "rear_oh": 2.05, "track": 1.85,
 		"c": 2.7, "max_steer": 38.0, "rear_tandem": 0.0, "cab_len": 2.1, "color": Color(0.92, 0.55, 0.1),
 		"trailer": {"D": 2.64, "width": 1.74, "front": -1.2, "back": 3.95, "track": 1.48, "tandem": 0.0, "lifted_front": true, "kind": "truck"},
 	},
 	"large": {   # tractor + 40 ft two-axle semi-trailer (대형견인)
-		"name": "트랙터 + 40피트 트레일러",
+		"name": "tow.spec.large",
 		"L": 3.9, "width": 2.49, "front_oh": 1.45, "rear_oh": 1.05, "track": 1.9,
 		"c": 0.0, "max_steer": 40.0, "rear_tandem": 1.3, "cab_len": 2.3, "color": Color(0.8, 0.12, 0.12),
 		"trailer": {"D": 8.8, "width": 2.49, "front": -1.2, "back": 11.0, "track": 1.9, "tandem": 1.3, "lifted_front": false, "kind": "box"},
