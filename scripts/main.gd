@@ -297,7 +297,7 @@ func _build_menu() -> void:
 	UiKit.spacer(tc, 4)
 	var tb := UiKit.button(tc, Lang.t("home.tow.open"), _open_towing, Color(0.45, 0.75, 1.0), Vector2(386, 54), 20)
 	tb.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	tc.get_parent().get_parent().visible = not OS.has_feature("web")   # the Toss mini-app ships the forklift exam only
+	tc.get_parent().visible = not OS.has_feature("web")   # the Toss mini-app ships the forklift exam only
 	var row := UiKit.hbox(mv, 10)
 	UiKit.ghost(row, Lang.t("home.records"), func(): _open("records"), Vector2(150, 48), 19)
 	UiKit.ghost(row, Lang.t("home.settings"), func(): _open("settings"), Vector2(150, 48), 19)
