@@ -248,7 +248,7 @@ def set_version(app_id, v):
 
 
 def set_screenshots(v):
-    for lc in LOCALES:
+    for lc in SHOTS:   # English falls back to the Korean set
         _shots(v, lc)
 
 
@@ -544,7 +544,7 @@ def main():
         step("version text", set_version, app_id, v)
         step("screenshots", set_screenshots, v)
         step("review details", set_review, v)
-        step("in-app purchase", set_iap, app_id)
+        # 1.0 sells nothing (purchases are off in the app); leave the IAP record alone
     if mode in ("submit", "all"):
         if FAILED:
             sys.exit("Setup steps failed, not submitting: " + ", ".join(FAILED))
